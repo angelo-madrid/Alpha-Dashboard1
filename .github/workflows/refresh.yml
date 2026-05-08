@@ -3,7 +3,7 @@ name: Refresh dashboard
 on:
   schedule:
     # 06:00 UTC daily = 02:00 ET (after US market close) = 14:00 SGT
-    - cron: '0 6 * * *'
+    - cron: '0 22 * * 1-5'
   workflow_dispatch:  # allow manual trigger from the Actions tab
 
 permissions:
