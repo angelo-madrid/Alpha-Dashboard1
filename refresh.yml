@@ -1,0 +1,40 @@
+name: Refresh dashboard
+
+on:
+  schedule:
+    # 06:00 UTC daily = 02:00 ET (after US market close) = 14:00 SGT
+    - cron: '0 6 * * *'
+  workflow_dispatch:  # allow manual trigger from the Actions tab
+
+permissions:
+  contents: write
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install yfinance pandas numpy
+
+      - name: Regenerate index.html
+        run: python generate_dashboard.py
+
+      - name: Commit if data changed
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add index.html
+          if git diff --cached --quiet; then
+            echo "No changes — skipping commit."
+          else
+            git commit -m "Auto-refresh dashboard data"
+            git push
+          fi
