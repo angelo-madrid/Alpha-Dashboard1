@@ -599,7 +599,7 @@ html = f"""<!DOCTYPE html>
   --bdr:#e2e0db;--bdr2:#ccc9c2;
   --txt:#1a1814;--mut:#7c7970;--dim:#f0efe9;
   --grn:#15803d;--red:#b91c1c;--amb:#b45309;
-  --spy:#16a34a;--mag:#1d4ed8;--tsl:#dc2626;--btc:#ea580c;
+  --spy:#16a34a;--mag:#1d4ed8;--tsl:#dc2626;--btc:#eab308;
   --zone:{zone_color};
 }}
 html,body{{background:var(--bg);color:var(--txt);font-family:'DM Mono',monospace;font-size:13px;min-height:100vh}}
@@ -895,7 +895,7 @@ hr{{border:none;border-top:.5px solid var(--bdr);margin:24px 0 12px}}
 
 <script>
 const DATA = {payload};
-const COLORS = {{SPY:'#16a34a',MAG7:'#1d4ed8',TSLA:'#dc2626',BTC:'#ea580c'}};
+const COLORS = {{SPY:'#16a34a',MAG7:'#1d4ed8',TSLA:'#dc2626',BTC:'#eab308'}};
 const FWD    = {{SPY:8,MAG7:11,TSLA:15,BTC:20}};
 const LONG_H = new Set(['5Y']);
 const LABELS = {{SPY:'SPY · BETA',MAG7:'MAG7 · ALPHA',TSLA:'TESLA · BET',BTC:'BITCOIN · BET'}};
