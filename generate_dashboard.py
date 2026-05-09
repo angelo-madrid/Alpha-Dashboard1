@@ -588,7 +588,7 @@ html = f"""<!DOCTYPE html>
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>Alpha Dashboard · Angelo Madrid</title>
+<title>Investment Dashboard</title>
 <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&family=Syne:wght@700;800&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet"/>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
@@ -754,7 +754,7 @@ hr{{border:none;border-top:.5px solid var(--bdr);margin:24px 0 12px}}
   <!-- HEADER -->
   <div class="hdr">
     <div class="hdr-left">
-      <h1>Alpha Dashboard <em>· Angelo Madrid</em></h1>
+      <h1>Investment Dashboard</h1>
       <div class="hdr-sub">AI Alpha Engine · Passive Anchor · Asymmetric Bets</div>
     </div>
     <div style="text-align:right">
@@ -888,7 +888,7 @@ hr{{border:none;border-top:.5px solid var(--bdr);margin:24px 0 12px}}
 
   <hr/>
   <div class="footer">
-    Alpha Dashboard · Angelo Madrid · yfinance data · MAG7: MSFT 25% / NVDA 25% / GOOGL 20% / META 15% / AMZN 10% / AAPL 5%<br>
+    Investment Dashboard · yfinance data · MAG7: MSFT 25% / NVDA 25% / GOOGL 20% / META 15% / AMZN 10% / AAPL 5%<br>
     Yield curve: OU mean reversion μ={OU_MU}% · Stock projections: CAGR (5Y) · Analyst target (≤1Y) · GBM (≤6M) · Not financial advice
   </div>
 </div>
