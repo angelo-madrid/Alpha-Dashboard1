@@ -107,23 +107,26 @@ CHART_TKS   = list(MAG7_W.keys()) + ["SPY","TSLA","BTC-USD"]
 ALL_TKS     = list(set(HOLDINGS_EQ + CHART_TKS))
 
 # ══ FETCH PRICES ══════════════════════════════════════════════════════════════
+# Use individual Ticker.history() calls — more reliable than batch download
+# in yfinance 1.x across different environments / GitHub Actions runners
 print("Fetching prices...")
 end = datetime.today(); start = end - timedelta(days=365*11)
-_raw_dl = yf.download(ALL_TKS, start=start.strftime("%Y-%m-%d"), end=end.strftime("%Y-%m-%d"),
-                      auto_adjust=True, progress=False)
-# Handle MultiIndex columns (yfinance 0.2.x+) vs flat columns (0.1.x)
-if isinstance(_raw_dl.columns, pd.MultiIndex):
-    raw = _raw_dl.xs("Close", axis=1, level=0)
-else:
-    raw = _raw_dl["Close"]
 prices = {}
-_cols = list(raw.columns) if isinstance(raw, pd.DataFrame) else [raw.name]
-for col in _cols:
-    s = (raw[col] if isinstance(raw, pd.DataFrame) else raw).dropna()
-    if len(s) > 5:
-        key = "BTC" if col == "BTC-USD" else str(col)
-        prices[key] = s
-        print(f"  {key}: last=${s.iloc[-1]:.2f}")
+for _tk in ALL_TKS:
+    try:
+        _hist = yf.Ticker(_tk).history(
+            start=start.strftime("%Y-%m-%d"),
+            end=end.strftime("%Y-%m-%d"),
+            auto_adjust=True,
+        )["Close"].dropna()
+        if len(_hist) > 5:
+            key = "BTC" if _tk == "BTC-USD" else str(_tk)
+            prices[key] = _hist
+            print(f"  {key}: {len(_hist)} rows  last=${_hist.iloc[-1]:.2f}")
+        else:
+            print(f"  {_tk}: insufficient data ({len(_hist)} rows)")
+    except Exception as _e:
+        print(f"  {_tk}: fetch failed — {_e}")
 
 components = []
 for t, w in MAG7_W.items():
@@ -203,10 +206,10 @@ for hkey, hcfg in PTFL_H.items():
 # ══ TREASURY YIELDS ═══════════════════════════════════════════════════════════
 print("\nFetching yields...")
 try:
-    _yr_dl = yf.download(["^TNX","^IRX"], start=(end-timedelta(days=365*6)).strftime("%Y-%m-%d"),
-                         end=end.strftime("%Y-%m-%d"), auto_adjust=True, progress=False)
-    yr = _yr_dl.xs("Close", axis=1, level=0) if isinstance(_yr_dl.columns, pd.MultiIndex) else _yr_dl["Close"]
-    tnx=yr["^TNX"].dropna(); irx=yr["^IRX"].dropna()
+    tnx = yf.Ticker("^TNX").history(start=(end-timedelta(days=365*6)).strftime("%Y-%m-%d"),
+                                     end=end.strftime("%Y-%m-%d"), auto_adjust=True)["Close"].dropna()
+    irx = yf.Ticker("^IRX").history(start=(end-timedelta(days=365*6)).strftime("%Y-%m-%d"),
+                                     end=end.strftime("%Y-%m-%d"), auto_adjust=True)["Close"].dropna()
     spread_series=(tnx-irx).dropna(); current_spread=float(spread_series.iloc[-1])
     print(f"  Spread: {current_spread:+.3f}%")
 except Exception as e:
