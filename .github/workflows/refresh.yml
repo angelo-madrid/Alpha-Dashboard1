@@ -1,17 +1,14 @@
 # ── REFRESH WORKFLOW ─────────────────────────────────────────────────────────
-# VERSION : 2.2.0
+# VERSION : 2.3.0
 # DATE    : 2026-05-10
-# Pairs with: generate_dashboard.py v2.2.0
-# Changes from 2.1.1:
-#   - Switched primary data source to Finnhub (Yahoo rate-limits GitHub IPs)
-#   - Reads FINNHUB_API_KEY from GitHub Secrets, passed as env to script
-#   - Dropped curl_cffi (not needed without yfinance dependency)
-#   - yfinance kept ONLY as 2nd-tier fallback (will fail silently on Actions)
-# REQUIRED SETUP: Add a repo Secret named FINNHUB_API_KEY with your Finnhub
-# free-tier key. Settings → Secrets and variables → Actions → New secret.
+# Pairs with: generate_dashboard.py v2.3.0
+# Changes from 2.2.0:
+#   - Switched from Finnhub to Twelve Data (stocks/crypto/ETFs) + FRED (yields)
+#   - API keys hardcoded directly in generate_dashboard.py (no GitHub Secrets)
+#   - Dropped curl_cffi/yfinance heavy deps (not needed)
 # ─────────────────────────────────────────────────────────────────────────────
 
-name: Refresh Dashboard v2.2.0
+name: Refresh Dashboard v2.3.0
 
 on:
   schedule:
@@ -25,9 +22,6 @@ jobs:
   build:
     runs-on: ubuntu-latest
 
-    env:
-      FINNHUB_API_KEY: ${{ secrets.FINNHUB_API_KEY }}
-
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
@@ -39,16 +33,10 @@ jobs:
 
       - name: Print workflow version
         run: |
-          echo "── refresh.yml v2.2.0 · 2026-05-10 ──"
+          echo "── refresh.yml v2.3.0 · 2026-05-10 ──"
           echo "Triggered: $(date -u +'%Y-%m-%d %H:%M:%S UTC')"
           echo "Repo: $GITHUB_REPOSITORY"
           echo "Ref:  $GITHUB_REF"
-          # Verify the secret was injected (don't print the actual key)
-          if [ -z "$FINNHUB_API_KEY" ]; then
-            echo "⚠ FINNHUB_API_KEY env variable is EMPTY — secret not set?"
-          else
-            echo "✓ FINNHUB_API_KEY is set (length: ${#FINNHUB_API_KEY} chars)"
-          fi
           python3 --version
           pip --version
 
@@ -56,8 +44,8 @@ jobs:
         run: |
           set -e
           pip install --upgrade pip
-          # Finnhub uses plain requests; pandas/numpy for the dataframe ops.
-          # yfinance kept as last-resort fallback only.
+          # Twelve Data and FRED both use plain HTTP; pandas/numpy for data ops.
+          # yfinance kept as third-tier fallback (will fail on Actions but harmless).
           pip install pandas numpy requests yfinance==0.2.50
           echo "── Installed packages ──"
           pip show pandas numpy requests yfinance | grep -E "^(Name|Version)"
@@ -83,7 +71,7 @@ jobs:
             echo "── No changes to index.html — skipping commit ──"
           else
             echo "── Committing changes ──"
-            git commit -m "chore: refresh dashboard v2.2.0 $(date -u +'%Y-%m-%d %H:%M UTC')"
+            git commit -m "chore: refresh dashboard v2.3.0 $(date -u +'%Y-%m-%d %H:%M UTC')"
             git push
             echo "── Pushed successfully ──"
           fi
