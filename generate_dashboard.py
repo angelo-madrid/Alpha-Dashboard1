@@ -1,10 +1,16 @@
 # ═════════════════════════════════════════════════════════════════════════════
 # ALPHA DASHBOARD — generate_dashboard.py
 # ═════════════════════════════════════════════════════════════════════════════
-#   VERSION   : 2.3.0
+#   VERSION   : 2.3.2
 #   DATE      : 2026-05-10
-#   PAIRS WITH: refresh.yml v2.3.0
+#   PAIRS WITH: refresh.yml v2.3.1+
 #   CHANGELOG :
+#     2.3.2 — Added analyst-target/fundamentals fields to FV_OVERLAY (manual
+#             monthly updates). Twelve Data free tier doesn't include these
+#             fields. NVDA pre-filled with May 2026 consensus; populate the
+#             rest from stockanalysis.com or tipranks.com.
+#     2.3.1 — Added 8-second sleep between fair value card builds to stay
+#             under Twelve Data 8/min free-tier rate limit.
 #     2.3.0 — Switched data sources: Twelve Data (stocks/crypto/ETFs) + FRED
 #             (Treasury yields). Both free tier, hardcoded keys near the top
 #             of this file. Stooq retained as last-resort fallback.
@@ -16,7 +22,7 @@
 #     2.0.0 — Merged eab308 chart base + portfolio holdings, snapshot,
 #             deployment gaps, version footer.
 # ═════════════════════════════════════════════════════════════════════════════
-SCRIPT_VERSION = "2.3.0"
+SCRIPT_VERSION = "2.3.2"
 SCRIPT_DATE    = "2026-05-10"
 
 """
@@ -62,8 +68,8 @@ import requests
 # ║   If your dashboard ever shows "rate limit exceeded", just rotate the     ║
 # ║   Twelve Data key (30 sec at twelvedata.com → API Keys → revoke + new).   ║
 # ╚═══════════════════════════════════════════════════════════════════════════╝
-TWELVEDATA_API_KEY = "0fbd7cea5285446e85d0880d27fd9085"   # ← paste your Twelve Data key between the quotes
-FRED_API_KEY       = "b8a3d518f4e1032f09e949b4ed7c2214"   # ← paste your FRED key between the quotes
+TWELVEDATA_API_KEY = ""   # ← paste your Twelve Data key between the quotes
+FRED_API_KEY       = ""   # ← paste your FRED key between the quotes
 
 # Allow env-variable override (useful if you later want to use GitHub Secrets):
 TWELVEDATA_KEY = os.environ.get("TWELVEDATA_API_KEY", TWELVEDATA_API_KEY).strip()
@@ -367,38 +373,71 @@ def get_zone(spread):
 # b1_w    = fraction of Bucket 1 monthly deployment (0 if not in B1)
 # bucket  = 1/2/3/hold
 # zone_action = per-zone deployment instruction
+# ── FAIR VALUE OVERLAY — manually-maintained fundamentals ────────────────────
+# These fields supplement the live price data from Twelve Data (which doesn't
+# include analyst targets, P/E, growth, or analyst counts on free tier).
+#
+#   UPDATE FREQUENCY: ~Monthly. Sources for current data:
+#     - Targets, analyst count: stockanalysis.com/stocks/{ticker}/forecast/
+#                               or tipranks.com/stocks/{ticker}/forecast
+#     - Fwd P/E, Rev Growth:    finance.yahoo.com/quote/{ticker}/key-statistics
+#     - Recommendation:         "strong_buy" / "buy" / "hold" / "sell" / "strong_sell"
+#
+#   LAST UPDATED: 2026-05-10 (May 2026 consensus data)
 FV_OVERLAY = {
     "NVDA": {
         "hist_pe": 50, "weight": "25% of Bucket 1", "b1_w": 0.25, "bucket": 1,
         "zone_action": {1:"Do Not Add",2:"Hold",3:"Buy Aggressively",4:"Buy Aggressively",5:"Max Deploy"},
+        # ── Live consensus (update monthly) ──
+        "target_mean": 270.73,  "target_low": 195.00,  "target_high": 360.00,
+        "fwd_pe": 25.87,        "rev_growth": 0.732,   "analysts": 37,
+        "recommendation": "strong_buy",
     },
     "MSFT": {
         "hist_pe": 33, "weight": "20% of Bucket 1", "b1_w": 0.20, "bucket": 1,
         "zone_action": {1:"Do Not Add",2:"Hold",3:"Buy Aggressively",4:"Buy Aggressively",5:"Max Deploy"},
+        "target_mean": None,    "target_low": None,    "target_high": None,
+        "fwd_pe": None,         "rev_growth": None,    "analysts": None,
+        "recommendation": "strong_buy",
     },
     "GOOGL": {
         "hist_pe": 25, "weight": "15% of Bucket 1", "b1_w": 0.15, "bucket": 1,
         "zone_action": {1:"Do Not Add",2:"Hold",3:"Hold — At Consensus",4:"Buy Systematically",5:"Buy Systematically"},
+        "target_mean": None,    "target_low": None,    "target_high": None,
+        "fwd_pe": None,         "rev_growth": None,    "analysts": None,
+        "recommendation": "strong_buy",
     },
     "AAPL": {
         "hist_pe": 32, "weight": "10% of Bucket 1", "b1_w": 0.10, "bucket": 1,
         "zone_action": {1:"Do Not Add",2:"Hold",3:"Accumulate Slowly",4:"Buy Systematically",5:"Buy Aggressively"},
+        "target_mean": None,    "target_low": None,    "target_high": None,
+        "fwd_pe": None,         "rev_growth": None,    "analysts": None,
+        "recommendation": "buy",
     },
     "META": {
         "hist_pe": 25, "weight": "20% of Bucket 1", "b1_w": 0.20, "bucket": 1,
         "zone_action": {1:"Do Not Add",2:"Hold",3:"Buy Aggressively",4:"Buy Aggressively",5:"Max Deploy"},
+        "target_mean": None,    "target_low": None,    "target_high": None,
+        "fwd_pe": None,         "rev_growth": None,    "analysts": None,
+        "recommendation": "strong_buy",
     },
     "AMZN": {
         "hist_pe": 22, "weight": "15% of Bucket 1", "b1_w": 0.15, "bucket": 1,
         "zone_action": {1:"Do Not Add",2:"Hold",3:"Buy Systematically",4:"Buy Systematically",5:"Buy Aggressively"},
+        "target_mean": None,    "target_low": None,    "target_high": None,
+        "fwd_pe": None,         "rev_growth": None,    "analysts": None,
+        "recommendation": "strong_buy",
     },
     "TSLA": {
         "hist_pe": 100, "weight": "5% of Bucket 3", "b1_w": 0.0, "bucket": 3,
         "zone_action": {1:"Do Not Add",2:"Do Not Add",3:"Do Not Add — Overvalued",4:"Small Position Only",5:"Small Position Only"},
+        "target_mean": None,    "target_low": None,    "target_high": None,
+        "fwd_pe": None,         "rev_growth": None,    "analysts": None,
+        "recommendation": "buy",
     },
     "SPYL": {
         "hist_pe": None, "weight": "Fixed 20% of portfolio", "b1_w": 0.0, "bucket": 2,
-        "spyl_target": 18.0,      # Wall St 2026 S&P consensus implied
+        "spyl_target": 18.0,
         "spyl_target_hi": 18.50,
         "s52w_high": 17.50,
         "zone_action": {1:"DCA Buy Fixed",2:"DCA Buy Fixed",3:"DCA Buy Fixed",4:"DCA Buy Fixed",5:"DCA Buy Fixed"},
@@ -723,6 +762,22 @@ live_prices = {}   # disp -> live price; populated by _build_card
 def _build_card(yt, disp, co, cls):
     info   = _fetch_fv(yt)
     ov     = FV_OVERLAY.get(disp, {})
+
+    # ── Layer manually-maintained analyst fields onto info ──────────────────
+    # These come from FV_OVERLAY (updated monthly) since Twelve Data free tier
+    # doesn't include analyst targets, P/E, growth, or analyst counts.
+    # Only fill if API didn't already return a value (yfinance .info wins if it works).
+    for ov_key, info_key in [
+        ("target_mean",    "targetMeanPrice"),
+        ("target_low",     "targetLowPrice"),
+        ("target_high",    "targetHighPrice"),
+        ("fwd_pe",         "forwardPE"),
+        ("rev_growth",     "revenueGrowth"),
+        ("analysts",       "numberOfAnalystOpinions"),
+        ("recommendation", "recommendationKey"),
+    ]:
+        if ov.get(ov_key) is not None and not info.get(info_key):
+            info[info_key] = ov[ov_key]
     price  = info.get("regularMarketPrice") or info.get("currentPrice")
     dec    = 0 if cls == "crypto" else 2
 
@@ -896,7 +951,19 @@ def _build_card(yt, disp, co, cls):
       </div>{spyl_dip_html}{btc_cycle_html}
     </div>"""
 
-fv_cards_html = "".join(_build_card(*c) for c in FV_CONFIG)
+# Build cards with rate-limit pacing — Twelve Data free tier allows 8 calls/min.
+# Each _build_card() may call td_quote() once. Sleep 8 seconds between cards
+# (after the first 4) to keep the running rate under 8/min when combined with
+# any candle calls already used within the same minute window.
+print(f"\nBuilding {len(FV_CONFIG)} fair value cards (with rate-limit pacing)...")
+_card_html_parts = []
+for idx, c in enumerate(FV_CONFIG):
+    if idx >= 4:
+        # First 4 calls fit in the per-minute budget alongside spillover from candles;
+        # after that, sleep to ensure we don't trip the 8/min limit.
+        time.sleep(8)
+    _card_html_parts.append(_build_card(*c))
+fv_cards_html = "".join(_card_html_parts)
 
 # ── PORTFOLIO HOLDINGS VALUATION ─────────────────────────────────────────────
 # Use live_prices populated by _build_card. For tickers not in FV_CONFIG (VOO, GOOG, ETH),
