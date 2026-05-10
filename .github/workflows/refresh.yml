@@ -1,14 +1,14 @@
 # ── REFRESH WORKFLOW ─────────────────────────────────────────────────────────
-# VERSION : 2.3.0
+# VERSION : 2.3.1
 # DATE    : 2026-05-10
-# Pairs with: generate_dashboard.py v2.3.0
+# Pairs with: generate_dashboard.py v2.3.1
 # Changes from 2.2.0:
 #   - Switched from Finnhub to Twelve Data (stocks/crypto/ETFs) + FRED (yields)
 #   - API keys hardcoded directly in generate_dashboard.py (no GitHub Secrets)
 #   - Dropped curl_cffi/yfinance heavy deps (not needed)
 # ─────────────────────────────────────────────────────────────────────────────
 
-name: Refresh Dashboard v2.3.0
+name: Refresh Dashboard v2.3.1
 
 on:
   schedule:
@@ -33,7 +33,7 @@ jobs:
 
       - name: Print workflow version
         run: |
-          echo "── refresh.yml v2.3.0 · 2026-05-10 ──"
+          echo "── refresh.yml v2.3.1 · 2026-05-10 ──"
           echo "Triggered: $(date -u +'%Y-%m-%d %H:%M:%S UTC')"
           echo "Repo: $GITHUB_REPOSITORY"
           echo "Ref:  $GITHUB_REF"
@@ -71,7 +71,7 @@ jobs:
             echo "── No changes to index.html — skipping commit ──"
           else
             echo "── Committing changes ──"
-            git commit -m "chore: refresh dashboard v2.3.0 $(date -u +'%Y-%m-%d %H:%M UTC')"
+            git commit -m "chore: refresh dashboard v2.3.1 $(date -u +'%Y-%m-%d %H:%M UTC')"
             git push
             echo "── Pushed successfully ──"
           fi
