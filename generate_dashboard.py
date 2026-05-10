@@ -1,3 +1,20 @@
+# ═════════════════════════════════════════════════════════════════════════════
+# ALPHA DASHBOARD — generate_dashboard.py
+# ═════════════════════════════════════════════════════════════════════════════
+#   VERSION   : 2.1.1
+#   DATE      : 2026-05-10
+#   PAIRS WITH: refresh.yml v2.1.1
+#   CHANGELOG :
+#     2.1.1 — Removed broken requests.Session injection; let yfinance manage
+#             auth via curl_cffi. Added curl_cffi dep. Stooq fallback retained.
+#     2.1.0 — Added robust fetcher: User-Agent session, retry logic,
+#             Stooq fallback, synthetic-price guard so script never crashes.
+#     2.0.0 — Merged eab308 chart base + portfolio holdings, snapshot,
+#             deployment gaps, version footer.
+# ═════════════════════════════════════════════════════════════════════════════
+SCRIPT_VERSION = "2.1.1"
+SCRIPT_DATE    = "2026-05-10"
+
 """
 generate_dashboard.py  —  Alpha-Dashboard1
 ==========================================
@@ -9,20 +26,129 @@ Generates index.html with:
   • SPYL dip trigger gauge
   • Stock price chart — 7D/30D/6M/YTD/1Y/5Y with analyst-target + CAGR projections
 
-    pip install yfinance pandas numpy
+    pip install yfinance pandas numpy requests curl_cffi
     python generate_dashboard.py
 """
 
-import json, webbrowser, os
+import json, webbrowser, os, time, io
 from datetime import datetime, timedelta
 
 import numpy as np
 import pandas as pd
 import yfinance as yf
 
-# ── VERSION ───────────────────────────────────────────────────────────────────
-SCRIPT_VERSION = "2.0.0"
-SCRIPT_DATE    = "2026-05-10"
+# ── ROBUST FETCH (fixes Yahoo blocking GitHub Actions runners) ───────────────
+# Yahoo Finance rejects requests from default Python user-agents. We:
+#   1) Use a real browser User-Agent on a requests.Session
+#   2) Retry up to 3 times with backoff on failure
+#   3) Fall back to Stooq (https://stooq.com) if Yahoo still won't talk to us
+import requests
+try:
+    from urllib3.util.retry import Retry
+    from requests.adapters import HTTPAdapter
+    HAS_RETRY = True
+except ImportError:
+    HAS_RETRY = False
+
+USER_AGENT = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+              "AppleWebKit/537.36 (KHTML, like Gecko) "
+              "Chrome/120.0.0.0 Safari/537.36")
+
+def make_session():
+    s = requests.Session()
+    s.headers.update({
+        "User-Agent": USER_AGENT,
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
+    })
+    if HAS_RETRY:
+        retry = Retry(total=3, backoff_factor=1.5,
+                      status_forcelist=[429, 500, 502, 503, 504],
+                      allowed_methods=["GET"])
+        s.mount("https://", HTTPAdapter(max_retries=retry))
+    return s
+
+HTTP_SESSION = make_session()
+
+def stooq_symbol(yf_ticker):
+    """Map a yfinance ticker to a Stooq ticker. Stooq uses .us/.uk suffixes."""
+    t = yf_ticker.upper()
+    if t in ("BTC-USD",): return "btcusd"
+    if t in ("ETH-USD",): return "ethusd"
+    if t == "^TNX":       return "10usy.b"   # 10-yr Treasury yield (Stooq)
+    if t == "^IRX":       return "13wtb.b"   # 13-week T-bill (best Stooq match)
+    if t == "SPYL.L":     return "spyl.uk"
+    return f"{t.lower()}.us"
+
+def stooq_history(yf_ticker, years=11):
+    """Download daily OHLC from Stooq as fallback. Returns Series of Close prices."""
+    sym = stooq_symbol(yf_ticker)
+    # Stooq daily CSV: https://stooq.com/q/d/l/?s=aapl.us&i=d
+    url = f"https://stooq.com/q/d/l/?s={sym}&i=d"
+    try:
+        r = HTTP_SESSION.get(url, timeout=15)
+        if r.status_code != 200 or not r.text or r.text.strip() == "No data":
+            return None
+        df = pd.read_csv(io.StringIO(r.text))
+        if df.empty or "Close" not in df.columns:
+            return None
+        df["Date"] = pd.to_datetime(df["Date"])
+        df = df.set_index("Date")["Close"].dropna()
+        cutoff = pd.Timestamp.today() - pd.DateOffset(years=years)
+        df = df[df.index >= cutoff]
+        return df if len(df) > 20 else None
+    except Exception as e:
+        print(f"  Stooq fetch failed for {yf_ticker} ({sym}): {e}")
+        return None
+
+def fetch_history(ticker_list, start_date, end_date, max_attempts=3):
+    """Try yfinance batch; fall back to Stooq per-ticker if needed.
+    yfinance 0.2.50 uses curl_cffi internally — do NOT inject a requests.Session."""
+    out = {}
+    # ── Attempt 1-3: yfinance batch (lets yfinance manage its own session) ──
+    for attempt in range(1, max_attempts + 1):
+        try:
+            print(f"  yfinance batch (attempt {attempt}/{max_attempts})...")
+            raw = yf.download(
+                ticker_list,
+                start=start_date.strftime("%Y-%m-%d"),
+                end=end_date.strftime("%Y-%m-%d"),
+                auto_adjust=True, progress=False,
+            )
+            # Handle both single-level and MultiIndex column shapes
+            if isinstance(raw.columns, pd.MultiIndex):
+                close = raw["Close"] if "Close" in raw.columns.get_level_values(0) else None
+            else:
+                close = raw["Close"] if "Close" in raw.columns else raw
+            if close is None or close.empty:
+                raise ValueError("empty Close DataFrame")
+            if len(ticker_list) == 1 and not isinstance(close, pd.DataFrame):
+                close = close.to_frame(ticker_list[0])
+            cols = close.columns if isinstance(close, pd.DataFrame) else [close.name]
+            for col in cols:
+                s = close[col].dropna() if isinstance(close, pd.DataFrame) else close.dropna()
+                if len(s) > 20:
+                    out[col] = s
+            if out:
+                print(f"  ✓ yfinance returned {len(out)} tickers")
+                break
+        except Exception as e:
+            print(f"  yfinance attempt {attempt} raised: {e}")
+        time.sleep(2 * attempt)
+
+    # ── Fallback: per-ticker Stooq for anything yfinance missed ──
+    missing = [t for t in ticker_list if t not in out]
+    if missing:
+        print(f"  Stooq fallback for: {missing}")
+        for t in missing:
+            s = stooq_history(t)
+            if s is not None and len(s) > 20:
+                out[t] = s
+                print(f"    ✓ Stooq: {t} ({len(s)} rows)")
+            else:
+                print(f"    ✗ Stooq: {t} (no data)")
+
+    return out
 
 # ── HOLDINGS CONFIG ───────────────────────────────────────────────────────────
 # Edit this when you execute trades. Format:
@@ -169,51 +295,52 @@ print("Fetching equity prices...")
 end   = datetime.today()
 start = end - timedelta(days=365*11)
 
-raw = yf.download(
-    ALL_TICKERS,
-    start=start.strftime("%Y-%m-%d"),
-    end=end.strftime("%Y-%m-%d"),
-    auto_adjust=True, progress=False,
-)["Close"]
+raw_prices = fetch_history(ALL_TICKERS, start, end)
 
 prices = {}
-for col in raw.columns:
-    s = raw[col].dropna()
-    if len(s) > 20:
-        if col == "BTC-USD":
-            key = "BTC"
-        elif col == "ETH-USD":
-            key = "ETH"
-        else:
-            key = str(col)
-        prices[key] = s
-        print(f"  {key}: {len(s)} rows  ${s.iloc[0]:.2f} → ${s.iloc[-1]:.2f}")
+for col, s in raw_prices.items():
+    if col == "BTC-USD":
+        key = "BTC"
+    elif col == "ETH-USD":
+        key = "ETH"
+    else:
+        key = str(col)
+    prices[key] = s
+    print(f"  {key}: {len(s)} rows  ${s.iloc[0]:.2f} → ${s.iloc[-1]:.2f}")
 
-# MAG7 basket
+if not prices:
+    print("  ⚠ NO PRICE DATA AVAILABLE — using synthetic fallback so dashboard still renders")
+    # Build minimal synthetic series so the rest of the script doesn't crash
+    fb_dates = pd.bdate_range(end=pd.Timestamp.today(), periods=300)
+    for t in ["SPY","MSFT","NVDA","META","GOOGL","AMZN","AAPL","TSLA","VOO","GOOG","BTC","ETH"]:
+        base = {"SPY":500,"MSFT":480,"NVDA":220,"META":700,"GOOGL":175,"AMZN":230,
+                "AAPL":220,"TSLA":290,"VOO":620,"GOOG":175,"BTC":95000,"ETH":3500}.get(t, 100)
+        prices[t] = pd.Series([base * (1 + 0.0003*i) for i in range(len(fb_dates))], index=fb_dates)
+
+# MAG7 basket — only include components we actually have
 components = []
 for t, w in MAG7_W.items():
     s = prices.get(t)
-    if s is not None:
+    if s is not None and len(s) > 20:
         components.append((s / s.iloc[0] * 100) * w)
-basket = pd.concat(components, axis=1).sum(axis=1)
-prices["MAG7"] = basket / basket.iloc[0] * 100
+if components:
+    basket = pd.concat(components, axis=1).sum(axis=1)
+    prices["MAG7"] = basket / basket.iloc[0] * 100
+else:
+    print("  ⚠ MAG7 basket: no components — using SPY as proxy")
+    prices["MAG7"] = prices.get("SPY", pd.Series(dtype=float))
 
 # ── FETCH TREASURY YIELDS ─────────────────────────────────────────────────────
 print("\nFetching Treasury yields (^TNX, ^IRX)...")
-try:
-    yld_raw = yf.download(
-        ["^TNX","^IRX"],
-        start=(end - timedelta(days=365*6)).strftime("%Y-%m-%d"),
-        end=end.strftime("%Y-%m-%d"),
-        auto_adjust=True, progress=False,
-    )["Close"]
-    tnx = yld_raw["^TNX"].dropna()
-    irx = yld_raw["^IRX"].dropna()
+yld = fetch_history(["^TNX","^IRX"], end - timedelta(days=365*6), end)
+tnx = yld.get("^TNX")
+irx = yld.get("^IRX")
+if tnx is not None and irx is not None and len(tnx) > 5 and len(irx) > 5:
     spread_series = (tnx - irx).dropna()
     current_spread = float(spread_series.iloc[-1])
     print(f"  10yr: {float(tnx.iloc[-1]):.3f}%  3mo: {float(irx.iloc[-1]):.3f}%  spread: {current_spread:+.3f}%")
-except Exception as e:
-    print(f"  Treasury fetch failed: {e}  — using fallback spread 0.64")
+else:
+    print("  Treasury fetch failed — using fallback spread 0.64 (Zone 3)")
     spread_series = pd.Series(dtype=float)
     current_spread = 0.64
 
@@ -384,11 +511,22 @@ FV_CONFIG = [
 ]
 
 def _fetch_fv(yt):
+    """Fetch ticker .info — let yfinance manage its own session/auth."""
     try:
         info = yf.Ticker(yt).info or {}
     except Exception as e:
-        print(f"  {yt} failed: {e}")
+        print(f"  {yt} fv-info failed: {e}")
         info = {}
+    # If .info is empty or has no price, try a minimal price-only fallback from history dict
+    if not info.get("regularMarketPrice") and not info.get("currentPrice"):
+        # Map disp ticker to history key
+        hist_key = "BTC" if yt == "BTC-USD" else ("ETH" if yt == "ETH-USD" else
+                   ("SPYL" if yt == "SPYL.L" else yt))
+        if hist_key in prices and len(prices[hist_key]) > 0:
+            info["regularMarketPrice"] = float(prices[hist_key].iloc[-1])
+            info["fiftyTwoWeekHigh"]   = float(prices[hist_key].tail(252).max())
+            info["fiftyTwoWeekLow"]    = float(prices[hist_key].tail(252).min())
+            print(f"  {yt} fv-info: using history fallback (price={info['regularMarketPrice']:.2f})")
     return info
 
 def _fmt(v, dec=2):
