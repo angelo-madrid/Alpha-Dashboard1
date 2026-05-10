@@ -1,22 +1,22 @@
 # ═════════════════════════════════════════════════════════════════════════════
 # ALPHA DASHBOARD — generate_dashboard.py
 # ═════════════════════════════════════════════════════════════════════════════
-#   VERSION   : 2.2.0
+#   VERSION   : 2.3.0
 #   DATE      : 2026-05-10
-#   PAIRS WITH: refresh.yml v2.2.0
+#   PAIRS WITH: refresh.yml v2.3.0
 #   CHANGELOG :
-#     2.2.0 — Switched primary data source from Yahoo (rate-limited on GH
-#             Actions) to Finnhub. Requires FINNHUB_API_KEY env variable
-#             (set as GitHub Secret). Stooq remains as fallback for symbols
-#             not on Finnhub free tier (^TNX, ^IRX, SPYL.L).
+#     2.3.0 — Switched data sources: Twelve Data (stocks/crypto/ETFs) + FRED
+#             (Treasury yields). Both free tier, hardcoded keys near the top
+#             of this file. Stooq retained as last-resort fallback.
+#     2.2.0 — Switched primary data source from Yahoo to Finnhub.
 #     2.1.1 — Removed broken requests.Session injection; let yfinance manage
-#             auth via curl_cffi. Added curl_cffi dep. Stooq fallback retained.
+#             auth via curl_cffi.
 #     2.1.0 — Added robust fetcher: User-Agent session, retry logic,
 #             Stooq fallback, synthetic-price guard so script never crashes.
 #     2.0.0 — Merged eab308 chart base + portfolio holdings, snapshot,
 #             deployment gaps, version footer.
 # ═════════════════════════════════════════════════════════════════════════════
-SCRIPT_VERSION = "2.2.0"
+SCRIPT_VERSION = "2.3.0"
 SCRIPT_DATE    = "2026-05-10"
 
 """
@@ -42,19 +42,43 @@ import pandas as pd
 import yfinance as yf
 
 # ── DATA SOURCE ARCHITECTURE ─────────────────────────────────────────────────
-# Yahoo Finance is rate-limited on GitHub Actions IP ranges (HTTP 429).
-# We use Finnhub as primary source (requires FINNHUB_API_KEY env variable),
-# with Stooq as fallback for symbols Finnhub doesn't cover on the free tier
-# (^TNX, ^IRX Treasury yields; SPYL.L London-listed ETF).
+# Yahoo Finance is rate-limited on GitHub Actions (HTTP 429). We use:
+#   • Twelve Data (twelvedata.com) — stocks, crypto, ETFs incl. SPYL:LSE
+#       Free tier: 800 calls/day, 8 calls/min. Need ~14 calls/day.
+#   • FRED (fred.stlouisfed.org) — Treasury yields ^TNX (DGS10), ^IRX (DGS3MO)
+#       Free tier: effectively unlimited.
+# Stooq remains as last-resort fallback if both APIs fail.
 import requests
 
-FINNHUB_KEY = os.environ.get("FINNHUB_API_KEY", "").strip()
-FINNHUB_BASE = "https://finnhub.io/api/v1"
+# ╔═══════════════════════════════════════════════════════════════════════════╗
+# ║   PASTE YOUR FREE API KEYS BETWEEN THE QUOTES BELOW                       ║
+# ║                                                                           ║
+# ║   1. Twelve Data:  https://twelvedata.com/register                        ║
+# ║                    Login → "API Keys" tab → copy 32-char key              ║
+# ║                                                                           ║
+# ║   2. FRED:         https://fredaccount.stlouisfed.org/apikey              ║
+# ║                    Request key → confirm email → copy 32-char key         ║
+# ║                                                                           ║
+# ║   If your dashboard ever shows "rate limit exceeded", just rotate the     ║
+# ║   Twelve Data key (30 sec at twelvedata.com → API Keys → revoke + new).   ║
+# ╚═══════════════════════════════════════════════════════════════════════════╝
+TWELVEDATA_API_KEY = "0fbd7cea5285446e85d0880d27fd9085"   # ← paste your Twelve Data key between the quotes
+FRED_API_KEY       = "b8a3d518f4e1032f09e949b4ed7c2214"   # ← paste your FRED key between the quotes
 
-if not FINNHUB_KEY:
-    print("⚠ FINNHUB_API_KEY not set — Finnhub disabled, will use Stooq only")
+# Allow env-variable override (useful if you later want to use GitHub Secrets):
+TWELVEDATA_KEY = os.environ.get("TWELVEDATA_API_KEY", TWELVEDATA_API_KEY).strip()
+FRED_KEY       = os.environ.get("FRED_API_KEY",       FRED_API_KEY).strip()
+TD_BASE        = "https://api.twelvedata.com"
+FRED_BASE      = "https://api.stlouisfed.org/fred"
+
+if not TWELVEDATA_KEY:
+    print("⚠ TWELVEDATA_API_KEY not set — Twelve Data disabled, will use Stooq only")
 else:
-    print(f"✓ Finnhub key loaded (length: {len(FINNHUB_KEY)} chars)")
+    print(f"✓ Twelve Data key loaded (length: {len(TWELVEDATA_KEY)} chars)")
+if not FRED_KEY:
+    print("⚠ FRED_API_KEY not set — Treasury fetch will fall back to Stooq or 0.64 placeholder")
+else:
+    print(f"✓ FRED key loaded (length: {len(FRED_KEY)} chars)")
 
 USER_AGENT = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
               "AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -67,72 +91,113 @@ HTTP_SESSION.headers.update({
     "Accept-Language": "en-US,en;q=0.9",
 })
 
-# Finnhub symbol map: yfinance ticker → Finnhub symbol
-# Crypto goes through Binance crypto exchange; stocks use raw ticker.
-def finnhub_symbol(yf_ticker):
+# ── Twelve Data symbol mapping ───────────────────────────────────────────────
+# US stocks: plain ticker (AAPL, MSFT, NVDA, etc.)
+# Crypto:    BTC/USD, ETH/USD format with slash
+# London ETF: SPYL:LSE (exchange suffix)
+# Treasury yields: NOT covered by Twelve Data — use FRED instead.
+def td_symbol(yf_ticker):
     t = yf_ticker.upper()
-    if t == "BTC-USD": return "BINANCE:BTCUSDT"
-    if t == "ETH-USD": return "BINANCE:ETHUSDT"
-    if t == "SPYL.L":  return None    # not on free tier — use Stooq
-    if t in ("^TNX", "^IRX"): return None  # not on free tier — use Stooq
-    return t   # plain US-listed: AAPL, MSFT, NVDA, etc.
+    if t == "BTC-USD": return "BTC/USD"
+    if t == "ETH-USD": return "ETH/USD"
+    if t == "SPYL.L":  return "SPYL:LSE"
+    if t in ("^TNX", "^IRX"): return None
+    return t   # AAPL, MSFT, NVDA, GOOGL, GOOG, META, AMZN, TSLA, SPY, VOO
 
-def finnhub_quote(yf_ticker):
-    """Live quote via Finnhub /quote. Returns dict with keys: c (current), h (high),
-    l (low), o (open), pc (prev close), and we add 52w high/low from candles."""
-    if not FINNHUB_KEY:
-        return None
-    sym = finnhub_symbol(yf_ticker)
-    if not sym:
-        return None
+def td_quote(yf_ticker):
+    """Live quote via Twelve Data /price endpoint. Returns float price or None."""
+    if not TWELVEDATA_KEY: return None
+    sym = td_symbol(yf_ticker)
+    if not sym: return None
     try:
-        r = HTTP_SESSION.get(f"{FINNHUB_BASE}/quote",
-                             params={"symbol": sym, "token": FINNHUB_KEY},
+        r = HTTP_SESSION.get(f"{TD_BASE}/price",
+                             params={"symbol": sym, "apikey": TWELVEDATA_KEY},
                              timeout=10)
         if r.status_code != 200:
-            print(f"  Finnhub quote {yf_ticker} ({sym}): HTTP {r.status_code}")
+            print(f"  TD quote {yf_ticker} ({sym}): HTTP {r.status_code}")
             return None
         data = r.json()
-        if not data or not data.get("c"):
-            return None
-        return data
+        if "price" in data:
+            return float(data["price"])
+        if data.get("status") == "error":
+            print(f"  TD quote {yf_ticker} ({sym}): {data.get('message', 'error')}")
+        return None
     except Exception as e:
-        print(f"  Finnhub quote {yf_ticker} ({sym}) failed: {e}")
+        print(f"  TD quote {yf_ticker} ({sym}) failed: {e}")
         return None
 
-def finnhub_candles(yf_ticker, days=400):
-    """Daily candles via Finnhub /stock/candle. Returns Series of close prices.
-    Free tier supports up to ~1 year. Returns None on failure."""
-    if not FINNHUB_KEY:
-        return None
-    sym = finnhub_symbol(yf_ticker)
-    if not sym:
-        return None
-    end_ts   = int(time.time())
-    start_ts = end_ts - (days * 86400)
+def td_candles(yf_ticker, days=400):
+    """Daily candles via Twelve Data /time_series. Returns Series of close prices."""
+    if not TWELVEDATA_KEY: return None
+    sym = td_symbol(yf_ticker)
+    if not sym: return None
     try:
-        r = HTTP_SESSION.get(f"{FINNHUB_BASE}/stock/candle",
-                             params={"symbol": sym, "resolution": "D",
-                                     "from": start_ts, "to": end_ts,
-                                     "token": FINNHUB_KEY},
+        r = HTTP_SESSION.get(f"{TD_BASE}/time_series",
+                             params={"symbol": sym, "interval": "1day",
+                                     "outputsize": min(days, 5000),
+                                     "apikey": TWELVEDATA_KEY,
+                                     "format": "JSON"},
                              timeout=15)
         if r.status_code != 200:
-            print(f"  Finnhub candles {yf_ticker} ({sym}): HTTP {r.status_code}")
+            print(f"  TD candles {yf_ticker} ({sym}): HTTP {r.status_code}")
             return None
         data = r.json()
-        if data.get("s") != "ok" or not data.get("c"):
-            print(f"  Finnhub candles {yf_ticker} ({sym}): status={data.get('s')}")
+        if data.get("status") == "error":
+            print(f"  TD candles {yf_ticker} ({sym}): {data.get('message', 'error')}")
             return None
-        # Finnhub returns: t (timestamps), c (closes), o, h, l, v
-        timestamps = pd.to_datetime(data["t"], unit="s")
-        closes = pd.Series(data["c"], index=timestamps).dropna()
-        return closes if len(closes) > 20 else None
+        values = data.get("values", [])
+        if not values:
+            return None
+        # values is newest-first list of {datetime, open, high, low, close, volume}
+        df = pd.DataFrame(values)
+        df["datetime"] = pd.to_datetime(df["datetime"])
+        df["close"]    = pd.to_numeric(df["close"], errors="coerce")
+        s = df.set_index("datetime")["close"].dropna().sort_index()
+        return s if len(s) > 20 else None
     except Exception as e:
-        print(f"  Finnhub candles {yf_ticker} ({sym}) failed: {e}")
+        print(f"  TD candles {yf_ticker} ({sym}) failed: {e}")
         return None
 
+# ── FRED for Treasury yields ─────────────────────────────────────────────────
+# FRED series IDs:
+#   DGS10  = 10-Year Treasury Constant Maturity Rate (matches ^TNX)
+#   DGS3MO = 3-Month Treasury Constant Maturity Rate (matches ^IRX)
+def fred_series(yf_ticker, days=400):
+    """Fetch a yield series from FRED. Returns Series indexed by date, values in %."""
+    if not FRED_KEY: return None
+    fred_id = {"^TNX": "DGS10", "^IRX": "DGS3MO"}.get(yf_ticker.upper())
+    if not fred_id: return None
+    try:
+        end_date   = datetime.today()
+        start_date = end_date - timedelta(days=days)
+        r = HTTP_SESSION.get(f"{FRED_BASE}/series/observations",
+                             params={"series_id": fred_id,
+                                     "api_key": FRED_KEY,
+                                     "file_type": "json",
+                                     "observation_start": start_date.strftime("%Y-%m-%d"),
+                                     "observation_end":   end_date.strftime("%Y-%m-%d")},
+                             timeout=15)
+        if r.status_code != 200:
+            print(f"  FRED {yf_ticker} ({fred_id}): HTTP {r.status_code}")
+            return None
+        data = r.json()
+        obs = data.get("observations", [])
+        if not obs:
+            return None
+        # FRED returns "." for missing values; values are strings
+        rows = [(o["date"], o["value"]) for o in obs if o["value"] not in (".", None, "")]
+        if not rows:
+            return None
+        dates  = pd.to_datetime([row[0] for row in rows])
+        values = pd.to_numeric([row[1] for row in rows], errors="coerce")
+        s = pd.Series(values, index=dates).dropna()
+        return s if len(s) > 5 else None
+    except Exception as e:
+        print(f"  FRED {yf_ticker} failed: {e}")
+        return None
+
+# ── Stooq last-resort fallback ───────────────────────────────────────────────
 def stooq_symbol(yf_ticker):
-    """Map a yfinance ticker to a Stooq ticker."""
     t = yf_ticker.upper()
     if t == "BTC-USD": return "btcusd"
     if t == "ETH-USD": return "ethusd"
@@ -142,16 +207,14 @@ def stooq_symbol(yf_ticker):
     return f"{t.lower()}.us"
 
 def stooq_history(yf_ticker, years=1):
-    """Download daily Close from Stooq. Used as fallback for yields/SPYL.L."""
+    """Download daily Close from Stooq. Used as last-resort fallback."""
     sym = stooq_symbol(yf_ticker)
-    # Stooq returns CSV via /q/d/l/. Use a different endpoint pattern that works.
     url = f"https://stooq.com/q/d/l/?s={sym}&i=d"
     try:
         r = HTTP_SESSION.get(url, timeout=15)
         if r.status_code != 200 or not r.text or "<html" in r.text[:200].lower():
             print(f"  Stooq {yf_ticker} ({sym}): blocked or HTML response")
             return None
-        # Stooq CSV format: Date,Open,High,Low,Close,Volume
         df = pd.read_csv(io.StringIO(r.text))
         if df.empty or "Close" not in df.columns:
             return None
@@ -164,28 +227,51 @@ def stooq_history(yf_ticker, years=1):
         print(f"  Stooq fetch failed for {yf_ticker} ({sym}): {e}")
         return None
 
+# ── MAIN HISTORICAL FETCHER ──────────────────────────────────────────────────
+# Routes each ticker to the appropriate provider:
+#   - Treasury yields (^TNX, ^IRX) → FRED → Stooq
+#   - Stocks/crypto/ETFs           → Twelve Data → Stooq
 def fetch_history(ticker_list, start_date, end_date, max_attempts=3):
-    """Primary: Finnhub candles. Fallback: Stooq for symbols Finnhub doesn't cover.
-    Note: max_attempts/start_date kept for signature compatibility; Finnhub uses
-    its own default of 400 days (covers 1-year free tier limit)."""
+    """Primary: Twelve Data for stocks/crypto, FRED for Treasury yields.
+    Fallback: Stooq for anything that fails."""
     out = {}
-    # ── Phase 1: Finnhub for stocks/crypto ──
-    finnhub_eligible = [t for t in ticker_list if finnhub_symbol(t) is not None]
-    finnhub_skipped  = [t for t in ticker_list if finnhub_symbol(t) is None]
 
-    if FINNHUB_KEY and finnhub_eligible:
-        print(f"  Finnhub candles for {len(finnhub_eligible)} tickers...")
-        for t in finnhub_eligible:
-            s = finnhub_candles(t, days=400)
-            if s is not None and len(s) > 20:
-                out[t] = s
-                print(f"    ✓ Finnhub: {t} ({len(s)} rows, ${s.iloc[-1]:.2f})")
-            else:
-                print(f"    ✗ Finnhub: {t} (no data)")
-            # Rate limit: free tier is 60/min, but be polite
-            time.sleep(0.2)
+    # ── Phase 1: split into FRED-eligible (yields) vs Twelve Data-eligible ──
+    fred_tickers = [t for t in ticker_list if t.upper() in ("^TNX", "^IRX")]
+    td_tickers   = [t for t in ticker_list if t.upper() not in ("^TNX", "^IRX")]
 
-    # ── Phase 2: Stooq fallback for everything Finnhub couldn't fetch ──
+    # ── Phase 2: FRED for Treasury yields ──
+    if fred_tickers:
+        if FRED_KEY:
+            print(f"  FRED for Treasury yields: {fred_tickers}")
+            for t in fred_tickers:
+                s = fred_series(t)
+                if s is not None and len(s) > 5:
+                    out[t] = s
+                    print(f"    ✓ FRED: {t} ({len(s)} rows, {s.iloc[-1]:.3f}%)")
+                else:
+                    print(f"    ✗ FRED: {t} (no data)")
+        else:
+            print(f"  Skipping FRED (no key) for: {fred_tickers}")
+
+    # ── Phase 3: Twelve Data for stocks/crypto/ETFs ──
+    if td_tickers:
+        if TWELVEDATA_KEY:
+            print(f"  Twelve Data candles for {len(td_tickers)} tickers...")
+            for t in td_tickers:
+                s = td_candles(t, days=400)
+                if s is not None and len(s) > 20:
+                    out[t] = s
+                    print(f"    ✓ TD: {t} ({len(s)} rows, ${s.iloc[-1]:.2f})")
+                else:
+                    print(f"    ✗ TD: {t} (no data)")
+                # Free tier is 8/min — sleep 8s between calls to stay under
+                # On first run it'll be slow (~14*8s = ~2 min); fine for daily refresh.
+                time.sleep(8)
+        else:
+            print(f"  Skipping Twelve Data (no key) for: {td_tickers}")
+
+    # ── Phase 4: Stooq fallback for everything still missing ──
     missing = [t for t in ticker_list if t not in out]
     if missing:
         print(f"  Stooq fallback for: {missing}")
@@ -193,7 +279,7 @@ def fetch_history(ticker_list, start_date, end_date, max_attempts=3):
             s = stooq_history(t, years=1)
             if s is not None and len(s) > 20:
                 out[t] = s
-                print(f"    ✓ Stooq: {t} ({len(s)} rows, ${s.iloc[-1]:.2f})")
+                print(f"    ✓ Stooq: {t} ({len(s)} rows)")
             else:
                 print(f"    ✗ Stooq: {t} (no data)")
 
@@ -560,23 +646,23 @@ FV_CONFIG = [
 ]
 
 def _fetch_fv(yt):
-    """Fair value info — Finnhub /quote primary, yfinance .info fallback,
+    """Fair value info — Twelve Data /price primary, yfinance .info fallback,
     history-derived fallback as last resort. Returns dict shaped like yfinance .info."""
     info = {}
 
-    # ── Phase 1: Finnhub /quote (works on free tier, no rate limiting on Actions) ──
-    fh_quote = finnhub_quote(yt)
-    if fh_quote and fh_quote.get("c"):
-        info["regularMarketPrice"] = float(fh_quote["c"])
-        info["currentPrice"]       = float(fh_quote["c"])
-        info["previousClose"]      = float(fh_quote.get("pc") or fh_quote["c"])
-        # Finnhub doesn't return 52w high/low in /quote — derive from history
+    # ── Phase 1: Twelve Data /price (works on free tier, reliable on Actions) ──
+    td_price = td_quote(yt)
+    if td_price is not None:
+        info["regularMarketPrice"] = float(td_price)
+        info["currentPrice"]       = float(td_price)
+        # Twelve Data /price doesn't return 52w high/low — derive from chart history
         hist_key = "BTC" if yt == "BTC-USD" else ("ETH" if yt == "ETH-USD" else
                    ("SPYL" if yt == "SPYL.L" else yt))
         if hist_key in prices and len(prices[hist_key]) > 0:
             info["fiftyTwoWeekHigh"] = float(prices[hist_key].tail(252).max())
             info["fiftyTwoWeekLow"]  = float(prices[hist_key].tail(252).min())
-        print(f"  {yt} fv: Finnhub quote ${info['regularMarketPrice']:.2f}")
+            info["previousClose"]    = float(prices[hist_key].iloc[-1])
+        print(f"  {yt} fv: TD quote ${info['regularMarketPrice']:.2f}")
         return info
 
     # ── Phase 2: yfinance .info (likely fails on Actions but harmless to try) ──
@@ -585,7 +671,7 @@ def _fetch_fv(yt):
         if yf_info.get("regularMarketPrice") or yf_info.get("currentPrice"):
             print(f"  {yt} fv: yfinance .info success")
             return yf_info
-    except Exception as e:
+    except Exception:
         pass  # silent — we expect this to fail on Actions
 
     # ── Phase 3: derive from chart history ──
