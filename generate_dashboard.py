@@ -1,9 +1,9 @@
 """
 generate_dashboard.py — Investment Dashboard
 =============================================
-VERSION : 1.6.0
-DATE    : 2026-05-10 09:07 PHT
-Fix     : pin yfinance==0.2.37 compatible; remove multi_level_index param
+VERSION : 1.7.0
+DATE    : 2026-05-10 09:23 PHT
+Fix     : version-aware fetch + footer brace fix
 
 Sections: Zone Banner · Yield Curve · Action Table · Portfolio Growth ·
           Holdings Snapshot · Deployment Gaps · Market Chart · Fair Value Cards
@@ -11,8 +11,8 @@ Sections: Zone Banner · Yield Curve · Action Table · Portfolio Growth ·
     pip install yfinance pandas numpy
     python generate_dashboard.py
 """
-SCRIPT_VERSION = "1.6.0"
-SCRIPT_DATE    = "2026-05-10 09:07 PHT"
+SCRIPT_VERSION = "1.7.0"
+SCRIPT_DATE    = "2026-05-10 09:23 PHT"
 import json, webbrowser, os
 from datetime import datetime, timedelta
 from collections import defaultdict
@@ -118,43 +118,58 @@ ALL_TKS     = list(set(HOLDINGS_EQ + CHART_TKS))
 print("Fetching prices...")
 end = datetime.today(); start = end - timedelta(days=365*11)
 prices = {}
-# Try batch download first (fast); fall back to individual calls if batch returns empty
+# Fetch prices — handles yfinance 0.2.x and 1.x
+# Strategy 1: batch download (fast)
 _batch_ok = False
 try:
-    _raw_dl = yf.download(
-        ALL_TKS,
-        start=start.strftime("%Y-%m-%d"),
-        end=end.strftime("%Y-%m-%d"),
-        auto_adjust=True, progress=False,
-    )["Close"]
+    _kw = dict(start=start.strftime("%Y-%m-%d"), end=end.strftime("%Y-%m-%d"),
+               auto_adjust=True, progress=False)
+    # multi_level_index only exists in yfinance >= 1.0
+    import yfinance as _yf_ver
+    if tuple(int(x) for x in _yf_ver.__version__.split(".")[:2]) >= (1, 0):
+        _kw["multi_level_index"] = False
+    _raw_dl = yf.download(ALL_TKS, **_kw)
+    # Handle both flat DataFrame (0.2.x) and possible MultiIndex (1.x)
+    if isinstance(_raw_dl.columns, pd.MultiIndex):
+        _raw_dl = _raw_dl["Close"]
+    elif "Close" in _raw_dl.columns:
+        _raw_dl = _raw_dl["Close"]
     if isinstance(_raw_dl, pd.DataFrame) and len(_raw_dl) > 20:
         for col in _raw_dl.columns:
             s = _raw_dl[col].dropna()
             if len(s) > 20:
                 key = "BTC" if col == "BTC-USD" else str(col)
                 prices[key] = s
-                print(f"  {key}: {len(s)} rows  ${s.iloc[0]:.2f} → ${s.iloc[-1]:.2f}")
         if prices:
             _batch_ok = True
-            print(f"  Batch download: {len(prices)} tickers loaded")
+            print(f"  Batch OK: {len(prices)} tickers, {len(_raw_dl)} rows")
+            for k, s in prices.items():
+                print(f"    {k}: {len(s)} rows  ${s.iloc[-1]:.2f}")
 except Exception as _e:
-    print(f"  Batch download failed: {_e}")
+    print(f"  Batch failed: {_e}")
 
+# Strategy 2: individual Ticker.history() fallback
 if not _batch_ok:
-    print("  Batch returned empty — falling back to individual Ticker.history() calls")
+    print("  Falling back to individual Ticker.history() calls...")
     for _tk in ALL_TKS:
         try:
             _s = yf.Ticker(_tk).history(
                 start=start.strftime("%Y-%m-%d"),
                 end=end.strftime("%Y-%m-%d"),
-                auto_adjust=True,
-            )["Close"].dropna()
+            )
+            if "Close" in _s.columns:
+                _s = _s["Close"].dropna()
+            elif len(_s.columns) > 0:
+                _s = _s.iloc[:, 0].dropna()
+            else:
+                continue
             if len(_s) > 20:
                 key = "BTC" if _tk == "BTC-USD" else str(_tk)
                 prices[key] = _s
-                print(f"  {key}: {len(_s)} rows  ${_s.iloc[0]:.2f} → ${_s.iloc[-1]:.2f}")
+                print(f"    {key}: {len(_s)} rows  ${_s.iloc[-1]:.2f}")
         except Exception as _e:
-            print(f"  {_tk}: failed — {_e}")
+            print(f"    {_tk}: failed — {_e}")
+    print(f"  Fallback loaded: {list(prices.keys())}")
 
 components = []
 for t, w in MAG7_W.items():
@@ -234,12 +249,15 @@ for hkey, hcfg in PTFL_H.items():
 # ══ TREASURY YIELDS ═══════════════════════════════════════════════════════════
 print("\nFetching yields...")
 try:
-    _yld_dl = yf.download(
-        ["^TNX", "^IRX"],
-        start=(end-timedelta(days=365*6)).strftime("%Y-%m-%d"),
-        end=end.strftime("%Y-%m-%d"),
-        auto_adjust=True, progress=False,
-    )["Close"]
+    _ykw = dict(start=(end-timedelta(days=365*6)).strftime("%Y-%m-%d"),
+                end=end.strftime("%Y-%m-%d"), auto_adjust=True, progress=False)
+    if tuple(int(x) for x in yf.__version__.split(".")[:2]) >= (1, 0):
+        _ykw["multi_level_index"] = False
+    _yld_dl = yf.download(["^TNX","^IRX"], **_ykw)
+    if isinstance(_yld_dl.columns, pd.MultiIndex):
+        _yld_dl = _yld_dl["Close"]
+    elif "Close" in _yld_dl.columns:
+        _yld_dl = _yld_dl["Close"]
     tnx = _yld_dl["^TNX"].dropna()
     irx = _yld_dl["^IRX"].dropna()
     spread_series=(tnx-irx).dropna(); current_spread=float(spread_series.iloc[-1])
@@ -861,7 +879,7 @@ hr{{border:none;border-top:.5px solid var(--bdr);margin:24px 0 12px}}
   Investment Dashboard · yfinance · MAG7: MSFT 25%/NVDA 25%/GOOGL 20%/META 15%/AMZN 10%/AAPL 5%<br>
   Portfolio: mark-to-market reconstruction · Yield curve: OU μ={OU_MU}% · Not financial advice<br>
   <span style="font-family:'DM Mono',monospace;font-size:11px;color:var(--zone);font-weight:600;letter-spacing:.05em">
-    v{{SCRIPT_VERSION}} &nbsp;·&nbsp; {{SCRIPT_DATE}}
+    v{SCRIPT_VERSION} &nbsp;·&nbsp; {SCRIPT_DATE}
   </span>
 </div>
 </div>
