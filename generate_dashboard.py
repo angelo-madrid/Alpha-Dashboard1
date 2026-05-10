@@ -1,14 +1,17 @@
 # ═════════════════════════════════════════════════════════════════════════════
 # ALPHA DASHBOARD — generate_dashboard.py
 # ═════════════════════════════════════════════════════════════════════════════
-#   VERSION   : 2.3.2
+#   VERSION   : 2.3.3
 #   DATE      : 2026-05-10
 #   PAIRS WITH: refresh.yml v2.3.1+
 #   CHANGELOG :
+#     2.3.3 — Pre-populated FV_OVERLAY with May 2026 analyst consensus for
+#             all 7 stocks (NVDA, MSFT, GOOGL, AAPL, META, AMZN, TSLA).
+#             Added SPYL = SPY × 0.0241 proxy formula (Twelve Data free tier
+#             doesn't include London-listed ETFs).
 #     2.3.2 — Added analyst-target/fundamentals fields to FV_OVERLAY (manual
 #             monthly updates). Twelve Data free tier doesn't include these
-#             fields. NVDA pre-filled with May 2026 consensus; populate the
-#             rest from stockanalysis.com or tipranks.com.
+#             fields. Only NVDA was prefilled.
 #     2.3.1 — Added 8-second sleep between fair value card builds to stay
 #             under Twelve Data 8/min free-tier rate limit.
 #     2.3.0 — Switched data sources: Twelve Data (stocks/crypto/ETFs) + FRED
@@ -22,7 +25,7 @@
 #     2.0.0 — Merged eab308 chart base + portfolio holdings, snapshot,
 #             deployment gaps, version footer.
 # ═════════════════════════════════════════════════════════════════════════════
-SCRIPT_VERSION = "2.3.2"
+SCRIPT_VERSION = "2.3.3"
 SCRIPT_DATE    = "2026-05-10"
 
 """
@@ -68,8 +71,8 @@ import requests
 # ║   If your dashboard ever shows "rate limit exceeded", just rotate the     ║
 # ║   Twelve Data key (30 sec at twelvedata.com → API Keys → revoke + new).   ║
 # ╚═══════════════════════════════════════════════════════════════════════════╝
-TWELVEDATA_API_KEY = "0fbd7cea5285446e85d0880d27fd9085"   # ← paste your Twelve Data key between the quotes
-FRED_API_KEY       = "b8a3d518f4e1032f09e949b4ed7c2214"   # ← paste your FRED key between the quotes
+TWELVEDATA_API_KEY = ""   # ← paste your Twelve Data key between the quotes
+FRED_API_KEY       = ""   # ← paste your FRED key between the quotes
 
 # Allow env-variable override (useful if you later want to use GitHub Secrets):
 TWELVEDATA_KEY = os.environ.get("TWELVEDATA_API_KEY", TWELVEDATA_API_KEY).strip()
@@ -106,7 +109,7 @@ def td_symbol(yf_ticker):
     t = yf_ticker.upper()
     if t == "BTC-USD": return "BTC/USD"
     if t == "ETH-USD": return "ETH/USD"
-    if t == "SPYL.L":  return "SPYL:LSE"
+    if t == "SPYL.L":  return None    # Premium-only on Twelve Data; synthesized from SPY × 0.0241
     if t in ("^TNX", "^IRX"): return None
     return t   # AAPL, MSFT, NVDA, GOOGL, GOOG, META, AMZN, TSLA, SPY, VOO
 
@@ -396,44 +399,44 @@ FV_OVERLAY = {
     "MSFT": {
         "hist_pe": 33, "weight": "20% of Bucket 1", "b1_w": 0.20, "bucket": 1,
         "zone_action": {1:"Do Not Add",2:"Hold",3:"Buy Aggressively",4:"Buy Aggressively",5:"Max Deploy"},
-        "target_mean": None,    "target_low": None,    "target_high": None,
-        "fwd_pe": None,         "rev_growth": None,    "analysts": None,
+        "target_mean": 569.46,  "target_low": 415.00,  "target_high": 680.00,
+        "fwd_pe": 22.0,         "rev_growth": 0.180,   "analysts": 37,
         "recommendation": "strong_buy",
     },
     "GOOGL": {
         "hist_pe": 25, "weight": "15% of Bucket 1", "b1_w": 0.15, "bucket": 1,
         "zone_action": {1:"Do Not Add",2:"Hold",3:"Hold — At Consensus",4:"Buy Systematically",5:"Buy Systematically"},
-        "target_mean": None,    "target_low": None,    "target_high": None,
-        "fwd_pe": None,         "rev_growth": None,    "analysts": None,
+        "target_mean": 427.00,  "target_low": 190.00,  "target_high": 515.00,
+        "fwd_pe": 27.8,         "rev_growth": 0.218,   "analysts": 45,
         "recommendation": "strong_buy",
     },
     "AAPL": {
         "hist_pe": 32, "weight": "10% of Bucket 1", "b1_w": 0.10, "bucket": 1,
         "zone_action": {1:"Do Not Add",2:"Hold",3:"Accumulate Slowly",4:"Buy Systematically",5:"Buy Aggressively"},
-        "target_mean": None,    "target_low": None,    "target_high": None,
-        "fwd_pe": None,         "rev_growth": None,    "analysts": None,
+        "target_mean": 304.16,  "target_low": 215.00,  "target_high": 400.00,
+        "fwd_pe": 30.0,         "rev_growth": 0.166,   "analysts": 30,
         "recommendation": "buy",
     },
     "META": {
         "hist_pe": 25, "weight": "20% of Bucket 1", "b1_w": 0.20, "bucket": 1,
         "zone_action": {1:"Do Not Add",2:"Hold",3:"Buy Aggressively",4:"Buy Aggressively",5:"Max Deploy"},
-        "target_mean": None,    "target_low": None,    "target_high": None,
-        "fwd_pe": None,         "rev_growth": None,    "analysts": None,
+        "target_mean": 836.39,  "target_low": 700.00,  "target_high": 1015.00,
+        "fwd_pe": 19.5,         "rev_growth": 0.331,   "analysts": 36,
         "recommendation": "strong_buy",
     },
     "AMZN": {
         "hist_pe": 22, "weight": "15% of Bucket 1", "b1_w": 0.15, "bucket": 1,
         "zone_action": {1:"Do Not Add",2:"Hold",3:"Buy Systematically",4:"Buy Systematically",5:"Buy Aggressively"},
-        "target_mean": None,    "target_low": None,    "target_high": None,
-        "fwd_pe": None,         "rev_growth": None,    "analysts": None,
+        "target_mean": 306.00,  "target_low": 250.00,  "target_high": 370.00,
+        "fwd_pe": 31.7,         "rev_growth": 0.166,   "analysts": 41,
         "recommendation": "strong_buy",
     },
     "TSLA": {
         "hist_pe": 100, "weight": "5% of Bucket 3", "b1_w": 0.0, "bucket": 3,
         "zone_action": {1:"Do Not Add",2:"Do Not Add",3:"Do Not Add — Overvalued",4:"Small Position Only",5:"Small Position Only"},
-        "target_mean": None,    "target_low": None,    "target_high": None,
-        "fwd_pe": None,         "rev_growth": None,    "analysts": None,
-        "recommendation": "buy",
+        "target_mean": 410.21,  "target_low": 125.00,  "target_high": 600.00,
+        "fwd_pe": 169.0,        "rev_growth": 0.158,   "analysts": 30,
+        "recommendation": "hold",
     },
     "SPYL": {
         "hist_pe": None, "weight": "Fixed 20% of portfolio", "b1_w": 0.0, "bucket": 2,
@@ -490,6 +493,15 @@ if not prices:
         base = {"SPY":500,"MSFT":480,"NVDA":220,"META":700,"GOOGL":175,"AMZN":230,
                 "AAPL":220,"TSLA":290,"VOO":620,"GOOG":175,"BTC":95000,"ETH":3500}.get(t, 100)
         prices[t] = pd.Series([base * (1 + 0.0003*i) for i in range(len(fb_dates))], index=fb_dates)
+
+# ── SPYL.L Proxy: SPYL = SPY × 0.0241 ────────────────────────────────────────
+# SPYL.L (London-listed SPDR S&P 500 UCITS ETF) is on Twelve Data Grow plan only.
+# It tracks the S&P 500 with a smaller share size; ratio ≈ 0.0241 vs SPY.
+# This computes a synthetic SPYL series from the SPY series we already have.
+SPYL_RATIO = 0.0241
+if "SPY" in prices and "SPYL" not in prices:
+    prices["SPYL"] = prices["SPY"] * SPYL_RATIO
+    print(f"  SPYL: synthesized from SPY × {SPYL_RATIO} → ${prices['SPYL'].iloc[-1]:.2f}")
 
 # MAG7 basket — only include components we actually have
 components = []
