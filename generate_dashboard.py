@@ -112,21 +112,20 @@ ALL_TKS     = list(set(HOLDINGS_EQ + CHART_TKS))
 print("Fetching prices...")
 end = datetime.today(); start = end - timedelta(days=365*11)
 prices = {}
-for _tk in ALL_TKS:
-    try:
-        _hist = yf.Ticker(_tk).history(
-            start=start.strftime("%Y-%m-%d"),
-            end=end.strftime("%Y-%m-%d"),
-            auto_adjust=True,
-        )["Close"].dropna()
-        if len(_hist) > 5:
-            key = "BTC" if _tk == "BTC-USD" else str(_tk)
-            prices[key] = _hist
-            print(f"  {key}: {len(_hist)} rows  last=${_hist.iloc[-1]:.2f}")
-        else:
-            print(f"  {_tk}: insufficient data ({len(_hist)} rows)")
-    except Exception as _e:
-        print(f"  {_tk}: fetch failed — {_e}")
+_raw_dl = yf.download(
+    ALL_TKS,
+    start=start.strftime("%Y-%m-%d"),
+    end=end.strftime("%Y-%m-%d"),
+    auto_adjust=True,
+    progress=False,
+    multi_level_index=False,
+)["Close"]
+for col in (_raw_dl.columns if isinstance(_raw_dl, pd.DataFrame) else [_raw_dl.name]):
+    s = (_raw_dl[col] if isinstance(_raw_dl, pd.DataFrame) else _raw_dl).dropna()
+    if len(s) > 20:
+        key = "BTC" if col == "BTC-USD" else str(col)
+        prices[key] = s
+        print(f"  {key}: {len(s)} rows  ${s.iloc[0]:.2f} → ${s.iloc[-1]:.2f}")
 
 components = []
 for t, w in MAG7_W.items():
@@ -206,10 +205,14 @@ for hkey, hcfg in PTFL_H.items():
 # ══ TREASURY YIELDS ═══════════════════════════════════════════════════════════
 print("\nFetching yields...")
 try:
-    tnx = yf.Ticker("^TNX").history(start=(end-timedelta(days=365*6)).strftime("%Y-%m-%d"),
-                                     end=end.strftime("%Y-%m-%d"), auto_adjust=True)["Close"].dropna()
-    irx = yf.Ticker("^IRX").history(start=(end-timedelta(days=365*6)).strftime("%Y-%m-%d"),
-                                     end=end.strftime("%Y-%m-%d"), auto_adjust=True)["Close"].dropna()
+    _yld_dl = yf.download(
+        ["^TNX", "^IRX"],
+        start=(end-timedelta(days=365*6)).strftime("%Y-%m-%d"),
+        end=end.strftime("%Y-%m-%d"),
+        auto_adjust=True, progress=False, multi_level_index=False,
+    )["Close"]
+    tnx = _yld_dl["^TNX"].dropna()
+    irx = _yld_dl["^IRX"].dropna()
     spread_series=(tnx-irx).dropna(); current_spread=float(spread_series.iloc[-1])
     print(f"  Spread: {current_spread:+.3f}%")
 except Exception as e:
