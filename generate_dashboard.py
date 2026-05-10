@@ -1,9 +1,9 @@
 """
 generate_dashboard.py — Investment Dashboard
 =============================================
-VERSION : 1.5.0
-DATE    : 2026-05-10 09:01 PHT
-Fix     : batch download + individual Ticker fallback for yfinance 1.x
+VERSION : 1.6.0
+DATE    : 2026-05-10 09:07 PHT
+Fix     : pin yfinance==0.2.37 compatible; remove multi_level_index param
 
 Sections: Zone Banner · Yield Curve · Action Table · Portfolio Growth ·
           Holdings Snapshot · Deployment Gaps · Market Chart · Fair Value Cards
@@ -11,8 +11,8 @@ Sections: Zone Banner · Yield Curve · Action Table · Portfolio Growth ·
     pip install yfinance pandas numpy
     python generate_dashboard.py
 """
-SCRIPT_VERSION = "1.5.0"
-SCRIPT_DATE    = "2026-05-10 09:01 PHT"
+SCRIPT_VERSION = "1.6.0"
+SCRIPT_DATE    = "2026-05-10 09:07 PHT"
 import json, webbrowser, os
 from datetime import datetime, timedelta
 from collections import defaultdict
@@ -125,7 +125,7 @@ try:
         ALL_TKS,
         start=start.strftime("%Y-%m-%d"),
         end=end.strftime("%Y-%m-%d"),
-        auto_adjust=True, progress=False, multi_level_index=False,
+        auto_adjust=True, progress=False,
     )["Close"]
     if isinstance(_raw_dl, pd.DataFrame) and len(_raw_dl) > 20:
         for col in _raw_dl.columns:
@@ -238,7 +238,7 @@ try:
         ["^TNX", "^IRX"],
         start=(end-timedelta(days=365*6)).strftime("%Y-%m-%d"),
         end=end.strftime("%Y-%m-%d"),
-        auto_adjust=True, progress=False, multi_level_index=False,
+        auto_adjust=True, progress=False,
     )["Close"]
     tnx = _yld_dl["^TNX"].dropna()
     irx = _yld_dl["^IRX"].dropna()
