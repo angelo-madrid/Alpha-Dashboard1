@@ -1,31 +1,28 @@
 # ═════════════════════════════════════════════════════════════════════════════
 # ALPHA DASHBOARD — generate_dashboard.py
 # ═════════════════════════════════════════════════════════════════════════════
-#   VERSION   : 2.3.3
+#   VERSION   : 2.3.4
 #   DATE      : 2026-05-10
 #   PAIRS WITH: refresh.yml v2.3.1+
 #   CHANGELOG :
+#     2.3.4 — Fixed deployment gap bug: GOOG (Class C) and GOOGL (Class A)
+#             now treated as same equity for allocation purposes. Citi 401k's
+#             141 GOOG shares ($55,984) now correctly counted toward GOOGL
+#             target weight, revealing 209% overweight (not 0% as before).
 #     2.3.3 — Pre-populated FV_OVERLAY with May 2026 analyst consensus for
-#             all 7 stocks (NVDA, MSFT, GOOGL, AAPL, META, AMZN, TSLA).
-#             Added SPYL = SPY × 0.0241 proxy formula (Twelve Data free tier
-#             doesn't include London-listed ETFs).
-#     2.3.2 — Added analyst-target/fundamentals fields to FV_OVERLAY (manual
-#             monthly updates). Twelve Data free tier doesn't include these
-#             fields. Only NVDA was prefilled.
+#             all 7 stocks. Added SPYL = SPY × 0.0241 proxy formula.
+#     2.3.2 — Added analyst-target/fundamentals fields to FV_OVERLAY.
 #     2.3.1 — Added 8-second sleep between fair value card builds to stay
 #             under Twelve Data 8/min free-tier rate limit.
 #     2.3.0 — Switched data sources: Twelve Data (stocks/crypto/ETFs) + FRED
-#             (Treasury yields). Both free tier, hardcoded keys near the top
-#             of this file. Stooq retained as last-resort fallback.
+#             (Treasury yields). Both free tier.
 #     2.2.0 — Switched primary data source from Yahoo to Finnhub.
-#     2.1.1 — Removed broken requests.Session injection; let yfinance manage
-#             auth via curl_cffi.
-#     2.1.0 — Added robust fetcher: User-Agent session, retry logic,
-#             Stooq fallback, synthetic-price guard so script never crashes.
+#     2.1.1 — Removed broken requests.Session injection.
+#     2.1.0 — Added robust fetcher: User-Agent session, retry logic, fallback.
 #     2.0.0 — Merged eab308 chart base + portfolio holdings, snapshot,
 #             deployment gaps, version footer.
 # ═════════════════════════════════════════════════════════════════════════════
-SCRIPT_VERSION = "2.3.3"
+SCRIPT_VERSION = "2.3.4"
 SCRIPT_DATE    = "2026-05-10"
 
 """
@@ -71,8 +68,8 @@ import requests
 # ║   If your dashboard ever shows "rate limit exceeded", just rotate the     ║
 # ║   Twelve Data key (30 sec at twelvedata.com → API Keys → revoke + new).   ║
 # ╚═══════════════════════════════════════════════════════════════════════════╝
-TWELVEDATA_API_KEY = "0fbd7cea5285446e85d0880d27fd9085"   # ← paste your Twelve Data key between the quotes
-FRED_API_KEY       = "b8a3d518f4e1032f09e949b4ed7c2214"   # ← paste your FRED key between the quotes
+TWELVEDATA_API_KEY = ""   # ← paste your Twelve Data key between the quotes
+FRED_API_KEY       = ""   # ← paste your FRED key between the quotes
 
 # Allow env-variable override (useful if you later want to use GitHub Secrets):
 TWELVEDATA_KEY = os.environ.get("TWELVEDATA_API_KEY", TWELVEDATA_API_KEY).strip()
@@ -1097,11 +1094,25 @@ for acc, t in account_totals.items():
 # For each ticker in TARGET_WEIGHTS, compute current weight vs target weight.
 # Sum holdings of that ticker across all accounts.
 def _holdings_for_ticker(t):
+    """Sum holdings of ticker `t` across all accounts.
+    Special case: GOOG (Class C) and GOOGL (Class A) are the same equity for
+    allocation purposes — they have the same price within ~1%, same business.
+    A holding in either bucket counts toward the target for the other."""
+    # Build the list of "equivalent" ticker symbols
+    if t == "GOOGL":
+        equivalent_tickers = {"GOOGL", "GOOG"}
+    elif t == "GOOG":
+        equivalent_tickers = {"GOOG", "GOOGL"}
+    else:
+        equivalent_tickers = {t}
+
     total = 0.0
     for account, positions in HOLDINGS.items():
         for ticker, h in positions.items():
-            if ticker == t and isinstance(h, dict):
-                price = _holding_price(t) or 0
+            if ticker in equivalent_tickers and isinstance(h, dict):
+                # Use the actual ticker's own price, not t's price
+                # (GOOG and GOOGL prices differ slightly even though correlated)
+                price = _holding_price(ticker) or 0
                 total += h["shares"] * price
     return total
 
