@@ -846,7 +846,7 @@ function renderYC(){{
   const yd=DATA.yc.horizons[curYCTab];if(!yd)return;
   if(ycI){{ycI.destroy();ycI=null;}}
   const zbPl={{id:'zb',beforeDraw(c){{const xs=c.scales.x,ys=c.scales.y;if(!xs||!ys)return;const ctx=c.ctx,ca=c.chartArea;ctx.save();
-    [{lo:-5,hi:0,bg:'rgba(220,38,38,.10)'},{lo:0,hi:.5,bg:'rgba(234,88,12,.07)'},{lo:.5,hi:1.21,bg:'rgba(217,119,6,.04)'},{lo:1.21,hi:2,bg:'rgba(22,163,74,.07)'},{lo:2,hi:5,bg:'rgba(21,128,61,.09)'}].forEach(b=>{{const y1=Math.min(ys.getPixelForValue(b.hi),ca.bottom),y2=Math.max(ys.getPixelForValue(b.lo),ca.top);if(y2>ca.bottom||y1<ca.top)return;ctx.fillStyle=b.bg;ctx.fillRect(ca.left,Math.min(y1,y2),ca.right-ca.left,Math.abs(y2-y1));}});
+    [{{lo:-5,hi:0,bg:'rgba(220,38,38,.10)'}},{{lo:0,hi:.5,bg:'rgba(234,88,12,.07)'}},{{lo:.5,hi:1.21,bg:'rgba(217,119,6,.04)'}},{{lo:1.21,hi:2,bg:'rgba(22,163,74,.07)'}},{{lo:2,hi:5,bg:'rgba(21,128,61,.09)'}}].forEach(b=>{{const y1=Math.min(ys.getPixelForValue(b.hi),ca.bottom),y2=Math.max(ys.getPixelForValue(b.lo),ca.top);if(y2>ca.bottom||y1<ca.top)return;ctx.fillStyle=b.bg;ctx.fillRect(ca.left,Math.min(y1,y2),ca.right-ca.left,Math.abs(y2-y1));}});
     const y0=ys.getPixelForValue(0);if(y0>=ca.top&&y0<=ca.bottom){{ctx.strokeStyle='rgba(220,38,38,.5)';ctx.lineWidth=1;ctx.setLineDash([3,3]);ctx.beginPath();ctx.moveTo(ca.left,y0);ctx.lineTo(ca.right,y0);ctx.stroke();}}ctx.restore();}}}};
   const ds=[];
   ds.push({{label:'Spread',data:yd.hist.map(([dt,v])=>{{return{{x:new Date(dt+'T12:00:00'),y:v}}}}),borderColor:ZC,backgroundColor:'transparent',borderWidth:2,pointRadius:0,tension:.15,order:2}});
