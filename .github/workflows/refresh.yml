@@ -1,15 +1,14 @@
 # ── REFRESH WORKFLOW ─────────────────────────────────────────────────────────
-# VERSION : 2.0.1
+# VERSION : 2.1.1
 # DATE    : 2026-05-10
-# Pairs with: generate_dashboard.py v2.0.0+
-# Changes from 2.0.0:
-#   - Added explicit permissions: contents: write (required for git push)
-#   - Bumped checkout@v3 → v4, setup-python@v4 → v5 (fixes Node.js 20 deprecation)
-#   - Hardened commit step: only runs if there are actual changes
-#   - Added "set -e" + verbose logging on each step for easier debugging
+# Pairs with: generate_dashboard.py v2.1.1
+# Changes from 2.0.1:
+#   - Pinned yfinance==0.2.50 (newer, handles Yahoo cookie/crumb auth better)
+#   - Added explicit requests + lxml deps
+#   - generate_dashboard.py now uses session+UA + Stooq fallback when Yahoo blocks
 # ─────────────────────────────────────────────────────────────────────────────
 
-name: Refresh Dashboard v2.0.1
+name: Refresh Dashboard v2.1.1
 
 on:
   schedule:
@@ -34,7 +33,7 @@ jobs:
 
       - name: Print workflow version
         run: |
-          echo "── refresh.yml v2.0.1 · 2026-05-10 ──"
+          echo "── refresh.yml v2.1.1 · 2026-05-10 ──"
           echo "Triggered: $(date -u +'%Y-%m-%d %H:%M:%S UTC')"
           echo "Repo: $GITHUB_REPOSITORY"
           echo "Ref:  $GITHUB_REF"
@@ -45,9 +44,11 @@ jobs:
         run: |
           set -e
           pip install --upgrade pip
-          pip install "yfinance==0.2.37" pandas numpy
+          # yfinance 0.2.50 uses curl_cffi internally to handle Yahoo's bot detection.
+          # Stooq fallback uses requests with a real User-Agent.
+          pip install "yfinance==0.2.50" pandas numpy requests lxml curl_cffi
           echo "── Installed packages ──"
-          pip show yfinance pandas numpy | grep -E "^(Name|Version)"
+          pip show yfinance pandas numpy requests curl_cffi | grep -E "^(Name|Version)"
 
       - name: Regenerate index.html
         run: |
@@ -70,7 +71,7 @@ jobs:
             echo "── No changes to index.html — skipping commit ──"
           else
             echo "── Committing changes ──"
-            git commit -m "chore: refresh dashboard v2.0.1 $(date -u +'%Y-%m-%d %H:%M UTC')"
+            git commit -m "chore: refresh dashboard v2.1.1 $(date -u +'%Y-%m-%d %H:%M UTC')"
             git push
             echo "── Pushed successfully ──"
           fi
