@@ -1,28 +1,26 @@
 # ═════════════════════════════════════════════════════════════════════════════
 # ALPHA DASHBOARD — generate_dashboard.py
 # ═════════════════════════════════════════════════════════════════════════════
-#   VERSION   : 2.3.4
+#   VERSION   : 2.3.5
 #   DATE      : 2026-05-10
 #   PAIRS WITH: refresh.yml v2.3.1+
 #   CHANGELOG :
+#     2.3.5 — Updated crypto holdings: BTC shares 0.14730 → 0.18486736,
+#             avg_cost $0 → $91,760 (effective with cryptoback rewards).
+#             Removed ETH position (sold).
 #     2.3.4 — Fixed deployment gap bug: GOOG (Class C) and GOOGL (Class A)
-#             now treated as same equity for allocation purposes. Citi 401k's
-#             141 GOOG shares ($55,984) now correctly counted toward GOOGL
-#             target weight, revealing 209% overweight (not 0% as before).
+#             now treated as same equity for allocation purposes.
 #     2.3.3 — Pre-populated FV_OVERLAY with May 2026 analyst consensus for
 #             all 7 stocks. Added SPYL = SPY × 0.0241 proxy formula.
 #     2.3.2 — Added analyst-target/fundamentals fields to FV_OVERLAY.
-#     2.3.1 — Added 8-second sleep between fair value card builds to stay
-#             under Twelve Data 8/min free-tier rate limit.
-#     2.3.0 — Switched data sources: Twelve Data (stocks/crypto/ETFs) + FRED
-#             (Treasury yields). Both free tier.
+#     2.3.1 — Added 8-second sleep between fair value card builds.
+#     2.3.0 — Switched data sources: Twelve Data + FRED.
 #     2.2.0 — Switched primary data source from Yahoo to Finnhub.
 #     2.1.1 — Removed broken requests.Session injection.
-#     2.1.0 — Added robust fetcher: User-Agent session, retry logic, fallback.
-#     2.0.0 — Merged eab308 chart base + portfolio holdings, snapshot,
-#             deployment gaps, version footer.
+#     2.1.0 — Added robust fetcher with fallbacks.
+#     2.0.0 — Merged eab308 chart base + portfolio holdings.
 # ═════════════════════════════════════════════════════════════════════════════
-SCRIPT_VERSION = "2.3.4"
+SCRIPT_VERSION = "2.3.5"
 SCRIPT_DATE    = "2026-05-10"
 
 """
@@ -321,8 +319,10 @@ HOLDINGS = {
         "CASH": 737.30,
     },
     "CRYPTO": {
-        "BTC": {"shares": 0.14730, "avg_cost": 0},   # native units
-        "ETH": {"shares": 0.229,   "avg_cost": 0},
+        # BTC: avg cost is effective USD-equivalent including cryptoback rewards.
+        # Calculation: ₱950,000 spent ÷ 0.18486736 BTC ≈ ₱5,138,553/BTC ÷ 56 PHP/USD.
+        # Updated 2026-05-10. ETH position closed (sold).
+        "BTC": {"shares": 0.18486736, "avg_cost": 91760},
     },
 }
 
