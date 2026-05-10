@@ -1,9 +1,9 @@
 """
 generate_dashboard.py — Investment Dashboard
 =============================================
-VERSION : 1.4.0
-DATE    : 2026-05-10 08:55 PHT
-Fix     : multi_level_index=False for yfinance 1.x compatibility
+VERSION : 1.5.0
+DATE    : 2026-05-10 09:01 PHT
+Fix     : batch download + individual Ticker fallback for yfinance 1.x
 
 Sections: Zone Banner · Yield Curve · Action Table · Portfolio Growth ·
           Holdings Snapshot · Deployment Gaps · Market Chart · Fair Value Cards
@@ -11,8 +11,8 @@ Sections: Zone Banner · Yield Curve · Action Table · Portfolio Growth ·
     pip install yfinance pandas numpy
     python generate_dashboard.py
 """
-SCRIPT_VERSION = "1.4.0"
-SCRIPT_DATE    = "2026-05-10 08:55 PHT"
+SCRIPT_VERSION = "1.5.0"
+SCRIPT_DATE    = "2026-05-10 09:01 PHT"
 import json, webbrowser, os
 from datetime import datetime, timedelta
 from collections import defaultdict
@@ -118,20 +118,43 @@ ALL_TKS     = list(set(HOLDINGS_EQ + CHART_TKS))
 print("Fetching prices...")
 end = datetime.today(); start = end - timedelta(days=365*11)
 prices = {}
-_raw_dl = yf.download(
-    ALL_TKS,
-    start=start.strftime("%Y-%m-%d"),
-    end=end.strftime("%Y-%m-%d"),
-    auto_adjust=True,
-    progress=False,
-    multi_level_index=False,
-)["Close"]
-for col in (_raw_dl.columns if isinstance(_raw_dl, pd.DataFrame) else [_raw_dl.name]):
-    s = (_raw_dl[col] if isinstance(_raw_dl, pd.DataFrame) else _raw_dl).dropna()
-    if len(s) > 20:
-        key = "BTC" if col == "BTC-USD" else str(col)
-        prices[key] = s
-        print(f"  {key}: {len(s)} rows  ${s.iloc[0]:.2f} → ${s.iloc[-1]:.2f}")
+# Try batch download first (fast); fall back to individual calls if batch returns empty
+_batch_ok = False
+try:
+    _raw_dl = yf.download(
+        ALL_TKS,
+        start=start.strftime("%Y-%m-%d"),
+        end=end.strftime("%Y-%m-%d"),
+        auto_adjust=True, progress=False, multi_level_index=False,
+    )["Close"]
+    if isinstance(_raw_dl, pd.DataFrame) and len(_raw_dl) > 20:
+        for col in _raw_dl.columns:
+            s = _raw_dl[col].dropna()
+            if len(s) > 20:
+                key = "BTC" if col == "BTC-USD" else str(col)
+                prices[key] = s
+                print(f"  {key}: {len(s)} rows  ${s.iloc[0]:.2f} → ${s.iloc[-1]:.2f}")
+        if prices:
+            _batch_ok = True
+            print(f"  Batch download: {len(prices)} tickers loaded")
+except Exception as _e:
+    print(f"  Batch download failed: {_e}")
+
+if not _batch_ok:
+    print("  Batch returned empty — falling back to individual Ticker.history() calls")
+    for _tk in ALL_TKS:
+        try:
+            _s = yf.Ticker(_tk).history(
+                start=start.strftime("%Y-%m-%d"),
+                end=end.strftime("%Y-%m-%d"),
+                auto_adjust=True,
+            )["Close"].dropna()
+            if len(_s) > 20:
+                key = "BTC" if _tk == "BTC-USD" else str(_tk)
+                prices[key] = _s
+                print(f"  {key}: {len(_s)} rows  ${_s.iloc[0]:.2f} → ${_s.iloc[-1]:.2f}")
+        except Exception as _e:
+            print(f"  {_tk}: failed — {_e}")
 
 components = []
 for t, w in MAG7_W.items():
