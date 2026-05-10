@@ -2,7 +2,7 @@
 generate_dashboard.py — Investment Dashboard
 =============================================
 VERSION : 1.4.0
-DATE    : 2026-05-10 08:51 PHT
+DATE    : 2026-05-10 08:55 PHT
 Fix     : multi_level_index=False for yfinance 1.x compatibility
 
 Sections: Zone Banner · Yield Curve · Action Table · Portfolio Growth ·
@@ -12,7 +12,7 @@ Sections: Zone Banner · Yield Curve · Action Table · Portfolio Growth ·
     python generate_dashboard.py
 """
 SCRIPT_VERSION = "1.4.0"
-SCRIPT_DATE    = "2026-05-10 08:51 PHT"
+SCRIPT_DATE    = "2026-05-10 08:55 PHT"
 import json, webbrowser, os
 from datetime import datetime, timedelta
 from collections import defaultdict
@@ -834,7 +834,13 @@ hr{{border:none;border-top:.5px solid var(--bdr);margin:24px 0 12px}}
 </div>
 
 <hr/>
-<div class="footer">Investment Dashboard · yfinance · MAG7: MSFT 25%/NVDA 25%/GOOGL 20%/META 15%/AMZN 10%/AAPL 5%<br>Portfolio: mark-to-market reconstruction · Yield curve: OU μ={OU_MU}% · Not financial advice · v{SCRIPT_VERSION}</div>
+<div class="footer">
+  Investment Dashboard · yfinance · MAG7: MSFT 25%/NVDA 25%/GOOGL 20%/META 15%/AMZN 10%/AAPL 5%<br>
+  Portfolio: mark-to-market reconstruction · Yield curve: OU μ={OU_MU}% · Not financial advice<br>
+  <span style="font-family:'DM Mono',monospace;font-size:11px;color:var(--zone);font-weight:600;letter-spacing:.05em">
+    v{{SCRIPT_VERSION}} &nbsp;·&nbsp; {{SCRIPT_DATE}}
+  </span>
+</div>
 </div>
 
 <script>
