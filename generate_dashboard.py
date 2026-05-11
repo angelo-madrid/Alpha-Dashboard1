@@ -1,40 +1,103 @@
 # ═════════════════════════════════════════════════════════════════════════════
 # ALPHA DASHBOARD — generate_dashboard.py
 # ═════════════════════════════════════════════════════════════════════════════
-#   VERSION   : 2.3.5
-#   DATE      : 2026-05-10
+#   VERSION   : 3.0.0
+#   DATE      : 2026-05-11
 #   PAIRS WITH: refresh.yml v2.3.1+
+#   STRATEGY  : Bogle/Buffett anchored, Mag6-dominant, Active vs Legacy split
 #   CHANGELOG :
-#     2.3.5 — Updated crypto holdings: BTC shares 0.14730 → 0.18486736,
-#             avg_cost $0 → $91,760 (effective with cryptoback rewards).
-#             Removed ETH position (sold).
-#     2.3.4 — Fixed deployment gap bug: GOOG (Class C) and GOOGL (Class A)
-#             now treated as same equity for allocation purposes.
-#     2.3.3 — Pre-populated FV_OVERLAY with May 2026 analyst consensus for
-#             all 7 stocks. Added SPYL = SPY × 0.0241 proxy formula.
-#     2.3.2 — Added analyst-target/fundamentals fields to FV_OVERLAY.
-#     2.3.1 — Added 8-second sleep between fair value card builds.
-#     2.3.0 — Switched data sources: Twelve Data + FRED.
-#     2.2.0 — Switched primary data source from Yahoo to Finnhub.
-#     2.1.1 — Removed broken requests.Session injection.
-#     2.1.0 — Added robust fetcher with fallbacks.
-#     2.0.0 — Merged eab308 chart base + portfolio holdings.
+#     3.0.6 — Full-deploy allocation (May 11):
+#             • Removed gap-cap on allocation: input always fully deployed.
+#             • Each open sleeve gets its renormalized matrix share of input,
+#                even if that pushes the sleeve slightly past target.
+#             • No more "Unallocated $X" leftover from capped sleeves.
+#             • Per user request: prefer slight overshoot over leftover cash.
+#             • Self-correcting: overshot sleeves go GREEN, get $0 next cycle.
+#     3.0.5 — SGOV restructured as parent + sub-rows (May 11):
+#             • Single SGOV parent row at TOP of allocation table (8% target)
+#                aggregates Cash Dry Powder + SpaceX + Anthropic earmarks.
+#             • Three indented sub-rows (├─ Cash Dry Powder, ├─ SpaceX,
+#                └─ Anthropic) show the breakdown at 4%/2%/2% sub-targets.
+#             • Tree characters + smaller/grayer styling on sub-rows.
+#             • Allocation math uses sub-rows (real matrix sleeves);
+#                parent's Allocation $ is the sum (display-only aggregate).
+#             • SpaceX/Anthropic removed from previous separate positions —
+#                now only appear nested under SGOV.
+#             • Stack order: SGOV block first, then equities below.
+#     3.0.4 — SGOV allocation restored (May 11):
+#             • SGOV re-included in matrix-weight deployment pool.
+#             • SGOV gets its proportional share (4%/64.8% renorm = ~$3K).
+#             • Visual separation at bottom of table maintained.
+#             • Corrects v3.0.3 over-correction that excluded SGOV entirely.
+#     3.0.3 — Allocation table refinements (May 11):
+#             • SGOV excluded from deployment pool — funded separately from
+#                cash float, not pre-deducted from monthly allocation input.
+#             • SGOV row pinned to bottom of table with visual separator.
+#             • Removed parenthetical breakdown "($X monthly + $Y plain cash)"
+#                from TOTAL DEPLOYED row. Just shows total.
+#             • SGOV row shows "—" in Allocation $ column; gap stays red to
+#                signal SGOV needs to be funded externally.
+#     3.0.2 — Monthly Allocation Table refinements (May 11):
+#             • SGOV gap calculated from actual SGOV ETF position ($0), not
+#               plain IBKR cash. Now shows real BUY target.
+#             • Plain IBKR cash treated as "deployment pool" (added to monthly
+#                input). Default deploy = $12,820 + plain cash.
+#             • Matrix-weight allocation: renormalized to under-target sleeves
+#                only (replaces gap-proportional pro-rata).
+#             • Added "Allocation $" column showing $ to deploy per row.
+#             • Added totals row at bottom of allocation table.
+#             • COLOR SWAP: RED gap = action needed; GREEN = at-target/over.
+#             • Caption updated to explain matrix-weight logic.
+#     3.0.1 — Monthly Allocation Table fixes per user review (May 11):
+#             • Whole-portfolio gap calculation (Active + Legacy combined,
+#               BTC excluded as legacy hold) — replaces old active-only math.
+#             • Citi-locked overweights display "OVER (locked)" with 0 shares.
+#             • SGOV gets its zone-matrix allocation share like any other sleeve
+#               — no "excess cash to redeploy" override logic.
+#             • Pro-rata deployment includes ALL positive gaps (SPYL, Mag6,
+#               earmarks, SGOV). Total monthly input fully distributed.
+#             • Removed priority-tier override that was skipping SPYL when
+#               active-overweight; now strict zone matrix at whole-portfolio.
+#     3.0.0 — MAJOR REFACTOR per canonical strategy.md (May 11, 2026):
+#             • New strategy structure: SPYL anchor + Mag6 alpha + SpaceX & 
+#               Anthropic earmarks + Cash. TSLA dropped. BTC moved to Legacy.
+#             • Mag6 internal weights unified: NVDA25/MSFT20/META20/GOOGL15/
+#               AMZN12/AAPL8 — single source of truth.
+#             • Zone matrix per strategy doc:
+#               Z1: SPYL31 Mag656 SpX2 Anth2 Cash9
+#               Z2: SPYL29 Mag661 SpX2 Anth2 Cash6
+#               Z3: SPYL28 Mag664 SpX2 Anth2 Cash4   <-- current
+#               Z4: SPYL25 Mag668 SpX2 Anth2 Cash3
+#               Z5: SPYL23 Mag671 SpX2 Anth2 Cash2
+#             • Active vs Legacy holdings separation in display.
+#             • Monthly Allocation Table replaces Monday Action Table.
+#             • Portfolio Performance: SPYL vs Mag6 vs Total Portfolio.
+#             • VOO merged conceptually into SPYL Anchor sleeve.
+#             • Removed TSLA fair value card and projection.
+#             • Removed PHP cash and emergency reserve concepts.
+#             • Fixed: data-source labels say "Twelve Data + FRED" everywhere.
+#             • Fixed: SPYL gap calculation (no more "+$0 OVER" bug).
+#             • Fixed: GOOGL shows in gap tracker.
+#             • Fixed: Dip Trigger uses 52w peak, not cost basis.
+#     2.3.5 — BTC holdings update (0.18486736 @ $91760 effective). ETH removed.
+#     2.3.4 — Fixed GOOG/GOOGL aggregation for deployment gap.
+#     2.3.3 — Pre-populated FV_OVERLAY with May 2026 consensus.
+#     2.3.0 — Twelve Data + FRED migration.
 # ═════════════════════════════════════════════════════════════════════════════
-SCRIPT_VERSION = "2.3.5"
-SCRIPT_DATE    = "2026-05-10"
+SCRIPT_VERSION = "3.0.6"
+SCRIPT_DATE    = "2026-05-11"  # v3.0.6 patch
 
 """
-generate_dashboard.py  —  Alpha-Dashboard1
+generate_dashboard.py — Alpha Dashboard v3
 ==========================================
-Generates index.html with:
-  • Yield curve chart (top) — 10yr-3mo spread, zone bands, OU mean-reversion projection
-  • Monday Action Table — editable cash input, zone-aware trade allocations
-  • Zone × Deployment Panel
-  • Fair value cards — all 9 instruments with PEG, deployment strategy, weight, allocation
-  • SPYL dip trigger gauge
-  • Stock price chart — 7D/30D/6M/YTD/1Y/5Y with analyst-target + CAGR projections
+Generates index.html with five major sections (in display order):
+  1. Monthly Allocation Table — replaces Monday Action Table; driven by zone matrix
+  2. Holdings Snapshot — Active / Legacy / Total breakdown
+  3. Portfolio Performance — SPYL vs Mag6 vs Total Portfolio (with YTD/1Y/5Y views)
+  4. Fair Value Assessment — Mag6 + SPYL + BTC (no TSLA)
+  5. Macro Overlay — yield curve, OU projection, zone bands
 
-    pip install yfinance pandas numpy requests curl_cffi
+    pip install pandas numpy requests
     python generate_dashboard.py
 """
 
@@ -43,15 +106,11 @@ from datetime import datetime, timedelta
 
 import numpy as np
 import pandas as pd
-import yfinance as yf
 
 # ── DATA SOURCE ARCHITECTURE ─────────────────────────────────────────────────
-# Yahoo Finance is rate-limited on GitHub Actions (HTTP 429). We use:
-#   • Twelve Data (twelvedata.com) — stocks, crypto, ETFs incl. SPYL:LSE
-#       Free tier: 800 calls/day, 8 calls/min. Need ~14 calls/day.
-#   • FRED (fred.stlouisfed.org) — Treasury yields ^TNX (DGS10), ^IRX (DGS3MO)
-#       Free tier: effectively unlimited.
-# Stooq remains as last-resort fallback if both APIs fail.
+# Twelve Data — stocks/crypto/ETFs (free: 800/day, 8/min — we use ~14 calls/day)
+# FRED         — Treasury yields (DGS10, DGS3MO)
+# Stooq        — last-resort fallback if both APIs fail
 import requests
 
 # ╔═══════════════════════════════════════════════════════════════════════════╗
@@ -63,13 +122,13 @@ import requests
 # ║   2. FRED:         https://fredaccount.stlouisfed.org/apikey              ║
 # ║                    Request key → confirm email → copy 32-char key         ║
 # ║                                                                           ║
-# ║   If your dashboard ever shows "rate limit exceeded", just rotate the     ║
+# ║   If your dashboard ever shows "rate limit exceeded", rotate the          ║
 # ║   Twelve Data key (30 sec at twelvedata.com → API Keys → revoke + new).   ║
 # ╚═══════════════════════════════════════════════════════════════════════════╝
-TWELVEDATA_API_KEY = "0fbd7cea5285446e85d0880d27fd9085"   # ← paste your Twelve Data key between the quotes
-FRED_API_KEY       = "b8a3d518f4e1032f09e949b4ed7c2214"   # ← paste your FRED key between the quotes
+TWELVEDATA_API_KEY = ""   # ← paste your Twelve Data key between the quotes
+FRED_API_KEY       = ""   # ← paste your FRED key between the quotes
 
-# Allow env-variable override (useful if you later want to use GitHub Secrets):
+# Allow env-variable override:
 TWELVEDATA_KEY = os.environ.get("TWELVEDATA_API_KEY", TWELVEDATA_API_KEY).strip()
 FRED_KEY       = os.environ.get("FRED_API_KEY",       FRED_API_KEY).strip()
 TD_BASE        = "https://api.twelvedata.com"
@@ -80,7 +139,7 @@ if not TWELVEDATA_KEY:
 else:
     print(f"✓ Twelve Data key loaded (length: {len(TWELVEDATA_KEY)} chars)")
 if not FRED_KEY:
-    print("⚠ FRED_API_KEY not set — Treasury fetch will fall back to Stooq or 0.64 placeholder")
+    print("⚠ FRED_API_KEY not set — Treasury fetch will fall back to Stooq or placeholder")
 else:
     print(f"✓ FRED key loaded (length: {len(FRED_KEY)} chars)")
 
@@ -96,20 +155,15 @@ HTTP_SESSION.headers.update({
 })
 
 # ── Twelve Data symbol mapping ───────────────────────────────────────────────
-# US stocks: plain ticker (AAPL, MSFT, NVDA, etc.)
-# Crypto:    BTC/USD, ETH/USD format with slash
-# London ETF: SPYL:LSE (exchange suffix)
-# Treasury yields: NOT covered by Twelve Data — use FRED instead.
 def td_symbol(yf_ticker):
     t = yf_ticker.upper()
     if t == "BTC-USD": return "BTC/USD"
-    if t == "ETH-USD": return "ETH/USD"
     if t == "SPYL.L":  return None    # Premium-only on Twelve Data; synthesized from SPY × 0.0241
     if t in ("^TNX", "^IRX"): return None
-    return t   # AAPL, MSFT, NVDA, GOOGL, GOOG, META, AMZN, TSLA, SPY, VOO
+    return t   # AAPL, MSFT, NVDA, GOOGL, GOOG, META, AMZN, SPY, VOO
 
 def td_quote(yf_ticker):
-    """Live quote via Twelve Data /price endpoint. Returns float price or None."""
+    """Live quote via Twelve Data /price. Returns float price or None."""
     if not TWELVEDATA_KEY: return None
     sym = td_symbol(yf_ticker)
     if not sym: return None
@@ -149,162 +203,146 @@ def td_candles(yf_ticker, days=400):
         if data.get("status") == "error":
             print(f"  TD candles {yf_ticker} ({sym}): {data.get('message', 'error')}")
             return None
-        values = data.get("values", [])
-        if not values:
+        vals = data.get("values", [])
+        if not vals:
             return None
-        # values is newest-first list of {datetime, open, high, low, close, volume}
-        df = pd.DataFrame(values)
-        df["datetime"] = pd.to_datetime(df["datetime"])
-        df["close"]    = pd.to_numeric(df["close"], errors="coerce")
-        s = df.set_index("datetime")["close"].dropna().sort_index()
-        return s if len(s) > 20 else None
+        rows = []
+        for v in vals:
+            try:
+                rows.append((pd.Timestamp(v["datetime"]), float(v["close"])))
+            except Exception:
+                continue
+        if not rows: return None
+        s = pd.Series(dict(rows)).sort_index()
+        return s
     except Exception as e:
         print(f"  TD candles {yf_ticker} ({sym}) failed: {e}")
         return None
 
 # ── FRED for Treasury yields ─────────────────────────────────────────────────
-# FRED series IDs:
-#   DGS10  = 10-Year Treasury Constant Maturity Rate (matches ^TNX)
-#   DGS3MO = 3-Month Treasury Constant Maturity Rate (matches ^IRX)
+FRED_SERIES = {"^TNX": "DGS10", "^IRX": "DGS3MO"}
+
 def fred_series(yf_ticker, days=400):
-    """Fetch a yield series from FRED. Returns Series indexed by date, values in %."""
     if not FRED_KEY: return None
-    fred_id = {"^TNX": "DGS10", "^IRX": "DGS3MO"}.get(yf_ticker.upper())
-    if not fred_id: return None
+    sid = FRED_SERIES.get(yf_ticker)
+    if not sid: return None
+    start = (datetime.today() - timedelta(days=days)).strftime("%Y-%m-%d")
     try:
-        end_date   = datetime.today()
-        start_date = end_date - timedelta(days=days)
         r = HTTP_SESSION.get(f"{FRED_BASE}/series/observations",
-                             params={"series_id": fred_id,
-                                     "api_key": FRED_KEY,
+                             params={"series_id": sid, "api_key": FRED_KEY,
                                      "file_type": "json",
-                                     "observation_start": start_date.strftime("%Y-%m-%d"),
-                                     "observation_end":   end_date.strftime("%Y-%m-%d")},
+                                     "observation_start": start},
                              timeout=15)
         if r.status_code != 200:
-            print(f"  FRED {yf_ticker} ({fred_id}): HTTP {r.status_code}")
+            print(f"  FRED {yf_ticker} ({sid}): HTTP {r.status_code}")
             return None
         data = r.json()
         obs = data.get("observations", [])
-        if not obs:
-            return None
-        # FRED returns "." for missing values; values are strings
-        rows = [(o["date"], o["value"]) for o in obs if o["value"] not in (".", None, "")]
-        if not rows:
-            return None
-        dates  = pd.to_datetime([row[0] for row in rows])
-        values = pd.to_numeric([row[1] for row in rows], errors="coerce")
-        s = pd.Series(values, index=dates).dropna()
-        return s if len(s) > 5 else None
+        if not obs: return None
+        rows = []
+        for o in obs:
+            v = o.get("value", ".")
+            if v in (".", ""): continue
+            try:
+                rows.append((pd.Timestamp(o["date"]), float(v)))
+            except Exception:
+                continue
+        if not rows: return None
+        s = pd.Series(dict(rows)).sort_index()
+        return s
     except Exception as e:
-        print(f"  FRED {yf_ticker} failed: {e}")
+        print(f"  FRED {yf_ticker} ({sid}) failed: {e}")
         return None
 
 # ── Stooq last-resort fallback ───────────────────────────────────────────────
 def stooq_symbol(yf_ticker):
     t = yf_ticker.upper()
     if t == "BTC-USD": return "btcusd"
-    if t == "ETH-USD": return "ethusd"
     if t == "^TNX":    return "10usy.b"
-    if t == "^IRX":    return "13wtb.b"
-    if t == "SPYL.L":  return "spyl.uk"
+    if t == "^IRX":    return "3muy.b"
+    if t == "SPYL.L":  return None
     return f"{t.lower()}.us"
 
 def stooq_history(yf_ticker, years=1):
-    """Download daily Close from Stooq. Used as last-resort fallback."""
     sym = stooq_symbol(yf_ticker)
+    if not sym: return None
     url = f"https://stooq.com/q/d/l/?s={sym}&i=d"
     try:
-        r = HTTP_SESSION.get(url, timeout=15)
-        if r.status_code != 200 or not r.text or "<html" in r.text[:200].lower():
-            print(f"  Stooq {yf_ticker} ({sym}): blocked or HTML response")
-            return None
+        r = HTTP_SESSION.get(url, timeout=10)
+        if r.status_code != 200 or len(r.text) < 50: return None
         df = pd.read_csv(io.StringIO(r.text))
-        if df.empty or "Close" not in df.columns:
-            return None
+        if "Date" not in df.columns or "Close" not in df.columns: return None
         df["Date"] = pd.to_datetime(df["Date"])
-        df = df.set_index("Date")["Close"].dropna()
-        cutoff = pd.Timestamp.today() - pd.DateOffset(years=years)
+        df = df.set_index("Date").sort_index()
+        cutoff = datetime.today() - timedelta(days=years*365)
         df = df[df.index >= cutoff]
-        return df if len(df) > 20 else None
-    except Exception as e:
-        print(f"  Stooq fetch failed for {yf_ticker} ({sym}): {e}")
+        return df["Close"].astype(float) if len(df) > 0 else None
+    except Exception:
         return None
 
 # ── MAIN HISTORICAL FETCHER ──────────────────────────────────────────────────
-# Routes each ticker to the appropriate provider:
-#   - Treasury yields (^TNX, ^IRX) → FRED → Stooq
-#   - Stocks/crypto/ETFs           → Twelve Data → Stooq
+print("Initializing data fetch...")
+
 def fetch_history(ticker_list, start_date, end_date, max_attempts=3):
-    """Primary: Twelve Data for stocks/crypto, FRED for Treasury yields.
-    Fallback: Stooq for anything that fails."""
+    """Fetch close-price history for tickers. Returns dict {ticker: pd.Series}."""
+    days = (end_date - start_date).days + 30
     out = {}
 
-    # ── Phase 1: split into FRED-eligible (yields) vs Twelve Data-eligible ──
-    fred_tickers = [t for t in ticker_list if t.upper() in ("^TNX", "^IRX")]
-    td_tickers   = [t for t in ticker_list if t.upper() not in ("^TNX", "^IRX")]
+    # Phase 1: split
+    fred_tickers = [t for t in ticker_list if t in FRED_SERIES]
+    other_tickers = [t for t in ticker_list if t not in FRED_SERIES and t != "SPYL.L"]
 
-    # ── Phase 2: FRED for Treasury yields ──
-    if fred_tickers:
-        if FRED_KEY:
-            print(f"  FRED for Treasury yields: {fred_tickers}")
-            for t in fred_tickers:
-                s = fred_series(t)
-                if s is not None and len(s) > 5:
-                    out[t] = s
-                    print(f"    ✓ FRED: {t} ({len(s)} rows, {s.iloc[-1]:.3f}%)")
-                else:
-                    print(f"    ✗ FRED: {t} (no data)")
+    # Phase 2: FRED for yields
+    for t in fred_tickers:
+        s = fred_series(t, days=days)
+        if s is not None and len(s) > 5:
+            out[t] = s.loc[(s.index >= start_date) & (s.index <= end_date)]
+            print(f"  ✓ {t}: FRED ({len(out[t])} rows)")
         else:
-            print(f"  Skipping FRED (no key) for: {fred_tickers}")
+            print(f"  ✗ {t}: FRED failed")
 
-    # ── Phase 3: Twelve Data for stocks/crypto/ETFs ──
-    if td_tickers:
-        if TWELVEDATA_KEY:
-            print(f"  Twelve Data candles for {len(td_tickers)} tickers...")
-            for t in td_tickers:
-                s = td_candles(t, days=400)
-                if s is not None and len(s) > 20:
-                    out[t] = s
-                    print(f"    ✓ TD: {t} ({len(s)} rows, ${s.iloc[-1]:.2f})")
-                else:
-                    print(f"    ✗ TD: {t} (no data)")
-                # Free tier is 8/min — sleep 8s between calls to stay under
-                # On first run it'll be slow (~14*8s = ~2 min); fine for daily refresh.
-                time.sleep(8)
+    # Phase 3: Twelve Data for stocks/crypto/ETFs
+    for t in other_tickers:
+        s = td_candles(t, days=days)
+        if s is not None and len(s) > 5:
+            out[t] = s.loc[(s.index >= start_date) & (s.index <= end_date)]
+            print(f"  ✓ {t}: Twelve Data ({len(out[t])} rows)")
         else:
-            print(f"  Skipping Twelve Data (no key) for: {td_tickers}")
-
-    # ── Phase 4: Stooq fallback for everything still missing ──
-    missing = [t for t in ticker_list if t not in out]
-    if missing:
-        print(f"  Stooq fallback for: {missing}")
-        for t in missing:
-            s = stooq_history(t, years=1)
-            if s is not None and len(s) > 20:
-                out[t] = s
-                print(f"    ✓ Stooq: {t} ({len(s)} rows)")
-            else:
-                print(f"    ✗ Stooq: {t} (no data)")
+            print(f"  ✗ {t}: Twelve Data failed, trying Stooq")
+            years = max(1, (end_date - start_date).days // 365 + 1)
+            s = stooq_history(t, years=years)
+            if s is not None and len(s) > 5:
+                out[t] = s.loc[(s.index >= start_date) & (s.index <= end_date)]
+                print(f"  ✓ {t}: Stooq ({len(out[t])} rows)")
+        time.sleep(8)  # respect 8/min limit
 
     return out
 
-# ── HOLDINGS CONFIG ───────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
+# STRATEGY CONFIG — from canonical strategy.md (v3.0.0)
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ── HOLDINGS — CURRENT POSITIONS ──────────────────────────────────────────────
 # Edit this when you execute trades. Format:
 #   ACCOUNT: { TICKER: {"shares": N, "avg_cost": price}, "CASH": amount }
-# Crypto held in CRYPTO account uses native unit (BTC count, not USD).
+#
+# CLASSIFICATION (per strategy doc):
+#   ACTIVE  = IBKR  → drives zone matrix, receives monthly contributions
+#   LEGACY  = Citi* (frozen) + CRYPTO (BTC, never add)
+#
+# Note: VOO in IBKR is conceptually merged with SPYL (same exposure).
 HOLDINGS = {
     "IBKR": {
         "META": {"shares": 18,   "avg_cost": 612.04},
         "MSFT": {"shares": 25,   "avg_cost": 419.18},
         "NVDA": {"shares": 50,   "avg_cost": 202.57},
-        "SPYL": {"shares": 2065, "avg_cost": 17.72},   # SPYL.L
+        "SPYL": {"shares": 2065, "avg_cost": 17.72},
         "VOO":  {"shares": 28,   "avg_cost": 605.89},
         "CASH": 31144.43,
     },
     "CITI_401K": {
         "AMZN": {"shares": 100, "avg_cost": 163.51},
-        "GOOG": {"shares": 141, "avg_cost": 122.71},   # GOOG not GOOGL in 401k
+        "GOOG": {"shares": 141, "avg_cost": 122.71},
         "META": {"shares": 25,  "avg_cost": 329.06},
         "CASH": 59.06,
     },
@@ -320,44 +358,65 @@ HOLDINGS = {
     },
     "CRYPTO": {
         # BTC: avg cost is effective USD-equivalent including cryptoback rewards.
-        # Calculation: ₱950,000 spent ÷ 0.18486736 BTC ≈ ₱5,138,553/BTC ÷ 56 PHP/USD.
-        # Updated 2026-05-10. ETH position closed (sold).
+        # Updated 2026-05-10. Held indefinitely; never add per strategy.
         "BTC": {"shares": 0.18486736, "avg_cost": 91760},
     },
 }
 
-# ── TARGET ALLOCATIONS (for Deployment Gaps tracker) ─────────────────────────
-# Target weights as fraction of total US-investable portfolio
-# Bucket 1 = AI Alpha (60% of risk capital), Bucket 2 = SPYL (20%), Bucket 3 = Asymmetric (5%)
-TARGET_WEIGHTS = {
-    "NVDA": 0.150,   # 25% of B1 (60%) = 15% of portfolio
-    "MSFT": 0.120,   # 20% of B1
-    "META": 0.120,   # 20% of B1
-    "GOOGL":0.090,   # 15% of B1
-    "AMZN": 0.090,   # 15% of B1
-    "AAPL": 0.060,   # 10% of B1
-    "SPYL": 0.200,   # Fixed 20%
-    "VOO":  0.100,   # Beta anchor
-    "TSLA": 0.025,   # 5% of B3 (5%) = 0.25% of portfolio (rounded up)
-    "BTC":  0.012,   # Hold only
+# Account classification: which accounts are ACTIVE vs LEGACY
+ACTIVE_ACCOUNTS = ["IBKR"]
+LEGACY_ACCOUNTS = ["CITI_401K", "CITI_ROTH", "CITI_BROK", "CRYPTO"]
+
+ACCOUNT_LABELS = {
+    "IBKR":      "IBKR",
+    "CITI_401K": "Citi 401k",
+    "CITI_ROTH": "Citi Roth",
+    "CITI_BROK": "Citi Brokerage",
+    "CRYPTO":    "Crypto (BTC)",
 }
 
-# ── ZONE CONFIG ───────────────────────────────────────────────────────────────
+# ── ZONE MATRIX — ACTIVE SLEEVES ──────────────────────────────────────────────
+# Per strategy doc Section 3. Percentages apply to ACTIVE capital (IBKR).
+# Sleeves: SPYL (anchor), MAG6 (alpha), SPACEX (earmark), ANTHROPIC (earmark), CASH
+# Note: SPACEX and ANTHROPIC earmarks physically held in SGOV.
+#       CASH dry powder also held in SGOV.
+ZONE_ALLOCATION = {
+    1: {"SPYL": 0.31, "MAG6": 0.56, "SPACEX": 0.02, "ANTHROPIC": 0.02, "CASH": 0.09},
+    2: {"SPYL": 0.29, "MAG6": 0.61, "SPACEX": 0.02, "ANTHROPIC": 0.02, "CASH": 0.06},
+    3: {"SPYL": 0.28, "MAG6": 0.64, "SPACEX": 0.02, "ANTHROPIC": 0.02, "CASH": 0.04},
+    4: {"SPYL": 0.25, "MAG6": 0.68, "SPACEX": 0.02, "ANTHROPIC": 0.02, "CASH": 0.03},
+    5: {"SPYL": 0.23, "MAG6": 0.71, "SPACEX": 0.02, "ANTHROPIC": 0.02, "CASH": 0.02},
+}
+
+# Verify all sum to 1.0
+for z, a in ZONE_ALLOCATION.items():
+    assert abs(sum(a.values()) - 1.0) < 1e-9, f"Zone {z} sums to {sum(a.values())}"
+
+# ── MAG6 INTERNAL WEIGHTS ─────────────────────────────────────────────────────
+# Per strategy doc Section 4 — fixed across all zones.
+# Single source of truth — all UI/calcs derive from this.
+MAG6_INTERNAL = {
+    "NVDA":  0.25,
+    "MSFT":  0.20,
+    "META":  0.20,
+    "GOOGL": 0.15,
+    "AMZN":  0.12,
+    "AAPL":  0.08,
+}
+assert abs(sum(MAG6_INTERNAL.values()) - 1.0) < 1e-9, "Mag6 must sum to 100%"
+
+# Ordered list for consistent display
+MAG6_ORDER = ["NVDA", "MSFT", "META", "GOOGL", "AMZN", "AAPL"]
+
+# ── ZONE METADATA ─────────────────────────────────────────────────────────────
 ZONE_META = {
-    1: {"label":"ZONE 1 — INVERTED",  "color":"#dc2626","bg":"#fef2f2","desc":"Recession signal active"},
-    2: {"label":"ZONE 2 — CAUTION",   "color":"#ea580c","bg":"#fff7ed","desc":"Post-inversion danger window"},
+    1: {"label":"ZONE 1 — INVERTED",  "color":"#dc2626","bg":"#fef2f2","desc":"Recession signal · maximum defense"},
+    2: {"label":"ZONE 2 — CAUTION",   "color":"#ea580c","bg":"#fff7ed","desc":"Curve uninverting · building dry powder"},
     3: {"label":"ZONE 3 — NEUTRAL",   "color":"#d97706","bg":"#fffbeb","desc":"Base operating zone"},
-    4: {"label":"ZONE 4 — HEALTHY",   "color":"#16a34a","bg":"#f0fdf4","desc":"Expansion confirmed"},
-    5: {"label":"ZONE 5 — BULL",      "color":"#15803d","bg":"#dcfce7","desc":"Strong expansion"},
+    4: {"label":"ZONE 4 — HEALTHY",   "color":"#16a34a","bg":"#f0fdf4","desc":"Mid-cycle expansion · lean offense"},
+    5: {"label":"ZONE 5 — BULL",      "color":"#15803d","bg":"#dcfce7","desc":"Steep curve · maximum offense"},
 }
 ZONE_BOUNDARIES = [0.0, 0.5, 1.21, 2.0]   # spread thresholds in %
-ZONE_DEPLOY = {
-    1: {"B1":"25%","SPYL":"20%","B3":"0%", "Dry":"50%","PHP":"5%"},
-    2: {"B1":"40%","SPYL":"20%","B3":"3%", "Dry":"32%","PHP":"5%"},
-    3: {"B1":"60%","SPYL":"20%","B3":"5%", "Dry":"10%","PHP":"5%"},
-    4: {"B1":"65%","SPYL":"20%","B3":"5%", "Dry":"5%", "PHP":"5%"},
-    5: {"B1":"70%","SPYL":"20%","B3":"5%", "Dry":"0%", "PHP":"5%"},
-}
 
 def get_zone(spread):
     if spread is None: return 3
@@ -367,155 +426,132 @@ def get_zone(spread):
     if spread < 2.0:  return 4
     return 5
 
-# ── STATIC OVERLAY CONFIG ────────────────────────────────────────────────────
-# hist_pe = 5-year average forward P/E (used for valuation overlay)
-# weight  = target allocation string
-# b1_w    = fraction of Bucket 1 monthly deployment (0 if not in B1)
-# bucket  = 1/2/3/hold
-# zone_action = per-zone deployment instruction
 # ── FAIR VALUE OVERLAY — manually-maintained fundamentals ────────────────────
-# These fields supplement the live price data from Twelve Data (which doesn't
-# include analyst targets, P/E, growth, or analyst counts on free tier).
+# UPDATE FREQUENCY: ~Monthly. Sources:
+#   - Targets, analyst count: stockanalysis.com/stocks/{ticker}/forecast/
+#   - Fwd P/E, Rev Growth:    finance.yahoo.com/quote/{ticker}/key-statistics
+# LAST UPDATED: 2026-05-10
 #
-#   UPDATE FREQUENCY: ~Monthly. Sources for current data:
-#     - Targets, analyst count: stockanalysis.com/stocks/{ticker}/forecast/
-#                               or tipranks.com/stocks/{ticker}/forecast
-#     - Fwd P/E, Rev Growth:    finance.yahoo.com/quote/{ticker}/key-statistics
-#     - Recommendation:         "strong_buy" / "buy" / "hold" / "sell" / "strong_sell"
-#
-#   LAST UPDATED: 2026-05-10 (May 2026 consensus data)
+# Per strategy v3.0.0: TSLA removed (no longer held).
+# Zone actions reflect strategy doc operational rules.
 FV_OVERLAY = {
     "NVDA": {
-        "hist_pe": 50, "weight": "25% of Bucket 1", "b1_w": 0.25, "bucket": 1,
-        "zone_action": {1:"Do Not Add",2:"Hold",3:"Buy Aggressively",4:"Buy Aggressively",5:"Max Deploy"},
-        # ── Live consensus (update monthly) ──
+        "hist_pe": 50, "mag6_weight": 0.25, "in_mag6": True,
+        "zone_action": {1:"Trim — Defensive",2:"Hold — Building Cash",3:"Buy Aggressively",4:"Buy Aggressively",5:"Max Deploy"},
         "target_mean": 270.73,  "target_low": 195.00,  "target_high": 360.00,
         "fwd_pe": 25.87,        "rev_growth": 0.732,   "analysts": 37,
         "recommendation": "strong_buy",
     },
     "MSFT": {
-        "hist_pe": 33, "weight": "20% of Bucket 1", "b1_w": 0.20, "bucket": 1,
-        "zone_action": {1:"Do Not Add",2:"Hold",3:"Buy Aggressively",4:"Buy Aggressively",5:"Max Deploy"},
+        "hist_pe": 33, "mag6_weight": 0.20, "in_mag6": True,
+        "zone_action": {1:"Trim — Defensive",2:"Hold",3:"Buy Aggressively",4:"Buy Aggressively",5:"Max Deploy"},
         "target_mean": 569.46,  "target_low": 415.00,  "target_high": 680.00,
         "fwd_pe": 22.0,         "rev_growth": 0.180,   "analysts": 37,
         "recommendation": "strong_buy",
     },
-    "GOOGL": {
-        "hist_pe": 25, "weight": "15% of Bucket 1", "b1_w": 0.15, "bucket": 1,
-        "zone_action": {1:"Do Not Add",2:"Hold",3:"Hold — At Consensus",4:"Buy Systematically",5:"Buy Systematically"},
-        "target_mean": 427.00,  "target_low": 190.00,  "target_high": 515.00,
-        "fwd_pe": 27.8,         "rev_growth": 0.218,   "analysts": 45,
-        "recommendation": "strong_buy",
-    },
-    "AAPL": {
-        "hist_pe": 32, "weight": "10% of Bucket 1", "b1_w": 0.10, "bucket": 1,
-        "zone_action": {1:"Do Not Add",2:"Hold",3:"Accumulate Slowly",4:"Buy Systematically",5:"Buy Aggressively"},
-        "target_mean": 304.16,  "target_low": 215.00,  "target_high": 400.00,
-        "fwd_pe": 30.0,         "rev_growth": 0.166,   "analysts": 30,
-        "recommendation": "buy",
-    },
     "META": {
-        "hist_pe": 25, "weight": "20% of Bucket 1", "b1_w": 0.20, "bucket": 1,
-        "zone_action": {1:"Do Not Add",2:"Hold",3:"Buy Aggressively",4:"Buy Aggressively",5:"Max Deploy"},
+        "hist_pe": 25, "mag6_weight": 0.20, "in_mag6": True,
+        "zone_action": {1:"Trim — Defensive",2:"Hold",3:"Buy Aggressively",4:"Buy Aggressively",5:"Max Deploy"},
         "target_mean": 836.39,  "target_low": 700.00,  "target_high": 1015.00,
         "fwd_pe": 19.5,         "rev_growth": 0.331,   "analysts": 36,
         "recommendation": "strong_buy",
     },
+    "GOOGL": {
+        "hist_pe": 25, "mag6_weight": 0.15, "in_mag6": True,
+        "zone_action": {1:"Trim — Defensive",2:"Hold",3:"Hold — At Consensus",4:"Buy Systematically",5:"Buy Systematically"},
+        "target_mean": 427.00,  "target_low": 190.00,  "target_high": 515.00,
+        "fwd_pe": 27.8,         "rev_growth": 0.218,   "analysts": 45,
+        "recommendation": "strong_buy",
+    },
     "AMZN": {
-        "hist_pe": 22, "weight": "15% of Bucket 1", "b1_w": 0.15, "bucket": 1,
-        "zone_action": {1:"Do Not Add",2:"Hold",3:"Buy Systematically",4:"Buy Systematically",5:"Buy Aggressively"},
+        "hist_pe": 22, "mag6_weight": 0.12, "in_mag6": True,
+        "zone_action": {1:"Trim — Defensive",2:"Hold",3:"Buy Systematically",4:"Buy Systematically",5:"Buy Aggressively"},
         "target_mean": 306.00,  "target_low": 250.00,  "target_high": 370.00,
         "fwd_pe": 31.7,         "rev_growth": 0.166,   "analysts": 41,
         "recommendation": "strong_buy",
     },
-    "TSLA": {
-        "hist_pe": 100, "weight": "5% of Bucket 3", "b1_w": 0.0, "bucket": 3,
-        "zone_action": {1:"Do Not Add",2:"Do Not Add",3:"Do Not Add — Overvalued",4:"Small Position Only",5:"Small Position Only"},
-        "target_mean": 410.21,  "target_low": 125.00,  "target_high": 600.00,
-        "fwd_pe": 169.0,        "rev_growth": 0.158,   "analysts": 30,
-        "recommendation": "hold",
+    "AAPL": {
+        "hist_pe": 32, "mag6_weight": 0.08, "in_mag6": True,
+        "zone_action": {1:"Trim — Defensive",2:"Hold",3:"Accumulate Slowly",4:"Buy Systematically",5:"Buy Aggressively"},
+        "target_mean": 304.16,  "target_low": 215.00,  "target_high": 400.00,
+        "fwd_pe": 30.0,         "rev_growth": 0.166,   "analysts": 30,
+        "recommendation": "buy",
     },
     "SPYL": {
-        "hist_pe": None, "weight": "Fixed 20% of portfolio", "b1_w": 0.0, "bucket": 2,
+        "hist_pe": None, "mag6_weight": 0.0, "in_mag6": False,
+        "is_anchor": True,
         "spyl_target": 18.0,
         "spyl_target_hi": 18.50,
-        "s52w_high": 17.50,
         "zone_action": {1:"DCA Buy Fixed",2:"DCA Buy Fixed",3:"DCA Buy Fixed",4:"DCA Buy Fixed",5:"DCA Buy Fixed"},
     },
     "BTC": {
-        "hist_pe": None, "weight": "Hold — 1.2% portfolio", "b1_w": 0.0, "bucket": 0,
+        "hist_pe": None, "mag6_weight": 0.0, "in_mag6": False,
+        "is_legacy": True,
         "s2f_low": 100000, "s2f_high": 150000,
-        "zone_action": {1:"Strategic Hold",2:"Strategic Hold",3:"Strategic Hold",4:"Strategic Hold",5:"Strategic Hold"},
+        "zone_action": {1:"Hold (Legacy)",2:"Hold (Legacy)",3:"Hold (Legacy)",4:"Hold (Legacy)",5:"Hold (Legacy)"},
     },
 }
 
-# ── ANALYST TARGETS (for stock price chart convergence projection) ────────────
-ANALYST_TARGETS = {
-    "TSLA": 280.0,   # consensus below current — will slope down
-    "SPY":  None,    # no single target
-    "MAG7": None,    # basket
-    "BTC":  None,
-}
-
 # ── STOCK CHART CONFIG ────────────────────────────────────────────────────────
-MAG7_W   = {"MSFT":0.25,"NVDA":0.25,"GOOGL":0.20,"META":0.15,"AMZN":0.10,"AAPL":0.05}
-FWD_CAGR = {"SPY":0.08,"MAG7":0.11,"TSLA":0.15,"BTC":0.20}
-VOLS     = {"SPY":0.16,"MAG7":0.22,"TSLA":0.65,"BTC":0.80}
-# Tickers fetched for chart history. Holdings tickers (VOO, GOOG, ETH) added so we get prices for valuation.
-ALL_TICKERS = list(MAG7_W.keys()) + ["SPY","TSLA","BTC-USD","VOO","GOOG","ETH-USD"]
+# Performance chart compares: SPYL · Mag6 · Total Portfolio
+# Mag6 basket weights = MAG6_INTERNAL (conviction-weighted per strategy)
+FWD_CAGR = {"SPYL": 0.09, "MAG6": 0.12, "PORTFOLIO": 0.105}
+VOLS     = {"SPYL": 0.16, "MAG6": 0.25, "PORTFOLIO": 0.20}
 
-# ── FETCH EQUITY PRICES ───────────────────────────────────────────────────────
-print("Fetching equity prices...")
-end   = datetime.today()
-start = end - timedelta(days=365*11)
+# Tickers fetched for chart history + holdings valuation
+# Note: TSLA dropped from active strategy; not fetched.
+ALL_TICKERS = ["NVDA","MSFT","META","GOOGL","AMZN","AAPL","SPY","VOO","GOOG","BTC-USD"]
+# ─────────────────────────────────────────────────────────────────────────────
+# DATA FETCH
+# ─────────────────────────────────────────────────────────────────────────────
 
-raw_prices = fetch_history(ALL_TICKERS, start, end)
+print("\nFetching equity prices...")
+today = datetime.today()
+start = today - timedelta(days=365*11)
+
+raw_prices = fetch_history(ALL_TICKERS, start, today)
 
 prices = {}
 for col, s in raw_prices.items():
     if col == "BTC-USD":
         key = "BTC"
-    elif col == "ETH-USD":
-        key = "ETH"
     else:
         key = str(col)
     prices[key] = s
     print(f"  {key}: {len(s)} rows  ${s.iloc[0]:.2f} → ${s.iloc[-1]:.2f}")
 
 if not prices:
-    print("  ⚠ NO PRICE DATA AVAILABLE — using synthetic fallback so dashboard still renders")
-    # Build minimal synthetic series so the rest of the script doesn't crash
+    print("  ⚠ NO PRICE DATA — using synthetic fallback so dashboard still renders")
     fb_dates = pd.bdate_range(end=pd.Timestamp.today(), periods=300)
-    for t in ["SPY","MSFT","NVDA","META","GOOGL","AMZN","AAPL","TSLA","VOO","GOOG","BTC","ETH"]:
+    for t in ["SPY","MSFT","NVDA","META","GOOGL","AMZN","AAPL","VOO","GOOG","BTC"]:
         base = {"SPY":500,"MSFT":480,"NVDA":220,"META":700,"GOOGL":175,"AMZN":230,
-                "AAPL":220,"TSLA":290,"VOO":620,"GOOG":175,"BTC":95000,"ETH":3500}.get(t, 100)
+                "AAPL":220,"VOO":620,"GOOG":175,"BTC":95000}.get(t, 100)
         prices[t] = pd.Series([base * (1 + 0.0003*i) for i in range(len(fb_dates))], index=fb_dates)
 
-# ── SPYL.L Proxy: SPYL = SPY × 0.0241 ────────────────────────────────────────
-# SPYL.L (London-listed SPDR S&P 500 UCITS ETF) is on Twelve Data Grow plan only.
-# It tracks the S&P 500 with a smaller share size; ratio ≈ 0.0241 vs SPY.
-# This computes a synthetic SPYL series from the SPY series we already have.
+# ── SPYL Proxy: SPYL = SPY × 0.0241 ──────────────────────────────────────────
+# SPYL.L (London-listed SPDR S&P 500 UCITS ETF) is Twelve Data Grow-tier only.
 SPYL_RATIO = 0.0241
 if "SPY" in prices and "SPYL" not in prices:
     prices["SPYL"] = prices["SPY"] * SPYL_RATIO
     print(f"  SPYL: synthesized from SPY × {SPYL_RATIO} → ${prices['SPYL'].iloc[-1]:.2f}")
 
-# MAG7 basket — only include components we actually have
+# ── MAG6 basket — conviction-weighted per strategy ────────────────────────────
 components = []
-for t, w in MAG7_W.items():
+for t, w in MAG6_INTERNAL.items():
     s = prices.get(t)
     if s is not None and len(s) > 20:
         components.append((s / s.iloc[0] * 100) * w)
 if components:
     basket = pd.concat(components, axis=1).sum(axis=1)
-    prices["MAG7"] = basket / basket.iloc[0] * 100
+    prices["MAG6"] = basket / basket.iloc[0] * 100
+    print(f"  MAG6 basket: built from {len(components)} components")
 else:
-    print("  ⚠ MAG7 basket: no components — using SPY as proxy")
-    prices["MAG7"] = prices.get("SPY", pd.Series(dtype=float))
+    print("  ⚠ MAG6 basket: no components — using SPY as proxy")
+    prices["MAG6"] = prices.get("SPY", pd.Series(dtype=float))
 
 # ── FETCH TREASURY YIELDS ─────────────────────────────────────────────────────
 print("\nFetching Treasury yields (^TNX, ^IRX)...")
-yld = fetch_history(["^TNX","^IRX"], end - timedelta(days=365*6), end)
+yld = fetch_history(["^TNX","^IRX"], today - timedelta(days=365*6), today)
 tnx = yld.get("^TNX")
 irx = yld.get("^IRX")
 if tnx is not None and irx is not None and len(tnx) > 5 and len(irx) > 5:
@@ -531,80 +567,73 @@ current_zone = get_zone(current_spread)
 print(f"  → {ZONE_META[current_zone]['label']}")
 
 # ── OU MEAN-REVERSION PROJECTION ──────────────────────────────────────────────
-OU_MU    = 1.5    # long-run mean spread %
-OU_THETA = 0.35   # mean reversion speed (calibrated)
-OU_SIGMA = 0.80   # spread volatility
+OU_MU    = 1.5
+OU_THETA = 0.35
+OU_SIGMA = 0.80
 
 def proj_ou(last_spread, last_date, end_date):
-    """Ornstein-Uhlenbeck mean reversion: E[X(t)] = mu + (X0-mu)*exp(-theta*t)"""
     dates = pd.bdate_range(start=last_date + timedelta(days=1), end=end_date)
-    if dates.empty: return [], [], []
-    t = np.arange(1, len(dates)+1) / 252
-    center = OU_MU + (last_spread - OU_MU) * np.exp(-OU_THETA * t)
-    var    = (OU_SIGMA**2 / (2*OU_THETA)) * (1 - np.exp(-2*OU_THETA*t))
-    band   = 1.645 * np.sqrt(np.maximum(var, 0))
-    fmt = lambda arr: [(str(d.date()), round(float(v), 4)) for d, v in zip(dates, arr)]
-    return fmt(center), fmt(center + band), fmt(center - band)
+    if len(dates) == 0: return [], [], []
+    dt = 1/252
+    pts, upper, lower = [], [], []
+    x = last_spread
+    for i, d in enumerate(dates):
+        t = (i+1) * dt
+        e_x = OU_MU + (last_spread - OU_MU) * np.exp(-OU_THETA * t)
+        var_x = (OU_SIGMA**2 / (2*OU_THETA)) * (1 - np.exp(-2*OU_THETA*t))
+        sd = np.sqrt(var_x)
+        pts.append((str(d.date()), round(float(e_x), 4)))
+        upper.append((str(d.date()), round(float(e_x + 1.0*sd), 4)))
+        lower.append((str(d.date()), round(float(e_x - 1.0*sd), 4)))
+    return pts, upper, lower
 
 # ── BUILD YIELD CURVE HORIZON DATA ───────────────────────────────────────────
-today = pd.Timestamp.today().normalize()
-
-YC_HORIZONS = {
-    "5Y":  {"back": pd.DateOffset(years=5),   "fwd": pd.DateOffset(years=5)},
-    "1Y":  {"back": pd.DateOffset(years=1),   "fwd": pd.DateOffset(years=1)},
-    "6M":  {"back": pd.DateOffset(months=6),  "fwd": pd.DateOffset(months=6)},
-    "30D": {"back": pd.DateOffset(days=30),   "fwd": pd.DateOffset(days=30)},
-}
-
+yc_horizons = {"30D":30, "6M":180, "1Y":365, "5Y":1825}
 yc_data = {}
-for hkey, hcfg in YC_HORIZONS.items():
-    if spread_series.empty:
-        # fallback synthetic data
-        dates_fb = pd.bdate_range(end=today, periods=60)
-        hist_pts = [(str(d.date()), round(current_spread + np.random.normal(0,0.1), 3)) for d in dates_fb]
-        proj_c, proj_u, proj_l = proj_ou(current_spread, today.to_pydatetime(), today + hcfg["fwd"])
-        yc_data[hkey] = {"hist": hist_pts, "proj": proj_c, "upper": proj_u, "lower": proj_l}
-        continue
+if len(spread_series) > 0:
+    for hkey, days in yc_horizons.items():
+        hist_start = today - timedelta(days=days)
+        hist = spread_series.loc[spread_series.index >= hist_start]
+        proj_end = today + timedelta(days=days)
+        last_d   = spread_series.index[-1].to_pydatetime()
+        proj, up, lo = proj_ou(current_spread, last_d, proj_end)
+        yc_data[hkey] = {
+            "hist": [(str(d.date()), round(float(v), 4)) for d, v in hist.items()],
+            "proj": proj, "upper": up, "lower": lo,
+        }
+else:
+    for hkey in yc_horizons:
+        yc_data[hkey] = {"hist": [], "proj": [], "upper": [], "lower": []}
 
-    hist_start = today - hcfg["back"]
-    proj_end   = today + hcfg["fwd"]
-    sliced = spread_series.loc[(spread_series.index >= hist_start) & (spread_series.index <= today)]
-    if len(sliced) < 2:
-        sliced = spread_series.tail(5)
-
-    hist_pts = [(str(d.date()), round(float(v), 4)) for d, v in sliced.items()]
-    last_date = sliced.index[-1].to_pydatetime()
-    proj_c, proj_u, proj_l = proj_ou(current_spread, last_date, proj_end)
-    yc_data[hkey] = {"hist": hist_pts, "proj": proj_c, "upper": proj_u, "lower": proj_l}
-
-# ── STOCK PRICE CHART HORIZON DATA ───────────────────────────────────────────
+# ── PERFORMANCE CHART HORIZON DATA ───────────────────────────────────────────
+# Compares: SPYL · MAG6 · PORTFOLIO (total)
 def biz_range(s, e):
-    return pd.bdate_range(start=s + timedelta(days=1), end=e)
+    return pd.bdate_range(start=s, end=e)
 
 def proj_cagr(lv, ld, ed, rate):
-    dates = biz_range(ld, ed)
-    if dates.empty: return []
-    days = np.arange(1, len(dates)+1)
-    return [(str(d.date()), round(float(lv * (1+rate)**(i/252)), 2))
-            for d, i in zip(dates, days)]
+    dates = biz_range(ld + timedelta(days=1), ed)
+    if len(dates) == 0: return []
+    pts = []
+    daily = (1 + rate) ** (1/252) - 1
+    cur = lv
+    for d in dates:
+        cur *= (1 + daily)
+        pts.append((str(d.date()), round(float(cur), 2)))
+    return pts
 
 def proj_gbm(lv, ld, ed, rate, vol, seed):
-    dates = biz_range(ld, ed)
-    if dates.empty: return []
-    rng = np.random.default_rng(seed=seed)
-    dt  = 1/252
-    shocks = rng.normal((rate - 0.5*vol**2)*dt, vol*np.sqrt(dt), len(dates))
-    vals   = lv * np.exp(np.cumsum(shocks))
-    return [(str(d.date()), round(float(v), 2)) for d, v in zip(dates, vals)]
-
-def proj_analyst(lv, lv_price, target_price, ld, ed):
-    """Linear convergence from current normalized value toward analyst target."""
-    dates = biz_range(ld, ed)
-    if dates.empty or not target_price or not lv_price: return []
-    n = len(dates)
-    target_norm = lv * (target_price / lv_price)
-    vals = np.linspace(lv, target_norm, n)
-    return [(str(d.date()), round(float(v), 2)) for d, v in zip(dates, vals)]
+    dates = biz_range(ld + timedelta(days=1), ed)
+    if len(dates) == 0: return []
+    rng = np.random.default_rng(seed)
+    daily_drift = (rate - 0.5*vol*vol) / 252
+    daily_vol   = vol / np.sqrt(252)
+    pts = []
+    cur = lv
+    for d in dates:
+        z = rng.standard_normal()
+        cur *= np.exp(daily_drift + daily_vol*z)
+        pts.append((str(d.date()), round(float(cur), 2)))
+    return pts
 
 def vol_bands(proj_pts, vol):
     upper, lower = [], []
@@ -615,13 +644,577 @@ def vol_bands(proj_pts, vol):
         lower.append((d, round(v/f, 2)))
     return upper, lower
 
-# New horizons: 7D/30D/6M/YTD/1Y/5Y
+# ─────────────────────────────────────────────────────────────────────────────
+# HOLDINGS VALUATION — split Active vs Legacy
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Fetch live prices for all FV-card tickers (these populate during FV card build)
+live_prices = {}
+
+# ── FAIR VALUE CARDS ──────────────────────────────────────────────────────────
+print("\nFetching fair value data...")
+
+# FV_CONFIG: (yfinance_ticker, display_ticker, company_name, asset_class)
+# Per v3.0.0 strategy: TSLA removed.
+FV_CONFIG = [
+    ("NVDA",    "NVDA",  "NVIDIA Corporation",      "stock"),
+    ("MSFT",    "MSFT",  "Microsoft Corporation",   "stock"),
+    ("META",    "META",  "Meta Platforms Inc.",     "stock"),
+    ("GOOGL",   "GOOGL", "Alphabet Inc.",           "stock"),
+    ("AMZN",    "AMZN",  "Amazon.com Inc.",         "stock"),
+    ("AAPL",    "AAPL",  "Apple Inc.",              "stock"),
+    ("SPYL.L",  "SPYL",  "SPDR S&P 500 UCITS ETF",  "etf"),
+    ("BTC-USD", "BTC",   "Bitcoin (Legacy Hold)",   "crypto"),
+]
+
+def _fetch_fv(yt):
+    """Fair value info — Twelve Data primary, history-derived fallback."""
+    info = {}
+    # Phase 1: Twelve Data /price
+    if yt == "SPYL.L":
+        spy_price = td_quote("SPY")
+        if spy_price:
+            info["regularMarketPrice"] = round(spy_price * SPYL_RATIO, 4)
+    elif yt == "BTC-USD":
+        p = td_quote("BTC-USD")
+        if p: info["regularMarketPrice"] = round(p, 2)
+    else:
+        p = td_quote(yt)
+        if p: info["regularMarketPrice"] = round(p, 2)
+    time.sleep(8)  # respect rate limit
+
+    # Phase 2: derive from chart history if Twelve Data didn't give us price
+    if "regularMarketPrice" not in info:
+        key = yt.replace(".L", "").replace("-USD", "")
+        if key == "SPYL" and "SPYL" in prices:
+            info["regularMarketPrice"] = float(prices["SPYL"].iloc[-1])
+        elif key in prices:
+            info["regularMarketPrice"] = float(prices[key].iloc[-1])
+
+    return info
+
+def _fmt(v, dec=2):
+    if v is None: return "—"
+    if isinstance(v, str): return v
+    try:
+        if dec == 0: return f"${int(round(v)):,}"
+        return f"${v:,.{dec}f}"
+    except Exception:
+        return "—"
+
+def _badge(rec, upside, disp):
+    if disp == "BTC": return ("Legacy Hold", "fv-hold")
+    if disp == "SPYL": return ("DCA BUY", "fv-dca")
+    r = (rec or "").lower()
+    if r == "strong_buy": return ("Strong Buy", "fv-buy")
+    if r == "buy":        return ("Buy", "fv-buy")
+    if r == "hold":       return ("Hold", "fv-hold")
+    if r == "sell":       return ("Sell", "fv-cau")
+    if upside is not None and upside > 0.10: return ("Buy", "fv-buy")
+    return ("Hold", "fv-hold")
+
+def _deploy_color(action):
+    a = (action or "").lower()
+    if "max" in a or "aggressively" in a: return "dep-green"
+    if "systematic" in a or "dca" in a or "accumulate" in a: return "dep-amber"
+    if "do not" in a or "trim" in a or "overvalued" in a: return "dep-red"
+    if "hold" in a or "consensus" in a: return "dep-neutral"
+    if "strategic" in a or "legacy" in a: return "dep-neutral"
+    return "dep-neutral"
+
+def _build_card(yt, disp, co, cls):
+    info = _fetch_fv(yt)
+    ov   = FV_OVERLAY.get(disp, {})
+    # Layer overlay analyst fields onto info
+    for k in ("target_mean","target_low","target_high","fwd_pe","rev_growth","analysts","recommendation"):
+        if k in ov: info[k] = ov[k]
+
+    price = info.get("regularMarketPrice")
+    if price is None: return ""
+    live_prices[disp] = price
+
+    target_mean = info.get("target_mean")
+    target_low  = info.get("target_low")
+    target_high = info.get("target_high")
+    fwd_pe      = info.get("fwd_pe")
+    rev_growth  = info.get("rev_growth")
+    analysts    = info.get("analysts")
+    rec         = info.get("recommendation")
+
+    upside = None
+    if target_mean and price > 0:
+        upside = (target_mean - price) / price
+
+    badge_text, badge_cls = _badge(rec, upside, disp)
+
+    # Core metrics row
+    metrics_html = ""
+    if disp == "SPYL":
+        s52w_high = float(prices["SPYL"].iloc[-252:].max()) if "SPYL" in prices and len(prices["SPYL"]) > 0 else price
+        s52w_low  = float(prices["SPYL"].iloc[-252:].min()) if "SPYL" in prices and len(prices["SPYL"]) > 0 else price
+        spyl_tgt  = ov.get("spyl_target", 18.0)
+        spyl_upd  = (spyl_tgt - price) / price if price > 0 else 0
+        target_str  = f"${spyl_tgt:.2f}"
+        upside_str  = f"{spyl_upd*100:+.1f}%"
+        low_str     = f"${s52w_low:.2f}"
+        high_str    = f"${s52w_high:.2f}"
+        metrics_html = f"""
+          <div class="fv-met"><div class="fv-met-lbl">Div Yield</div><div class="fv-met-val">—</div></div>
+          <div class="fv-met"><div class="fv-met-lbl">52w High</div><div class="fv-met-val">${s52w_high:.2f}</div></div>
+          <div class="fv-met"><div class="fv-met-lbl">52w Low</div><div class="fv-met-val">${s52w_low:.2f}</div></div>"""
+    elif disp == "BTC":
+        s52w_high = float(prices["BTC"].iloc[-252:].max()) if "BTC" in prices and len(prices["BTC"]) > 0 else price
+        s52w_low  = float(prices["BTC"].iloc[-252:].min()) if "BTC" in prices and len(prices["BTC"]) > 0 else price
+        s2f_low  = ov.get("s2f_low", 100000)
+        s2f_high = ov.get("s2f_high", 150000)
+        target_str  = f"${s2f_low:,.0f}"
+        target_high_str = f"${s2f_high:,.0f}"
+        upside_str = f"{((s2f_low-price)/price*100):+.1f}%" if price > 0 else "—"
+        low_str    = f"${s52w_low:,.0f}"
+        high_str   = f"${s52w_high:,.0f}"
+        metrics_html = f"""
+          <div class="fv-met"><div class="fv-met-lbl">Market Cap</div><div class="fv-met-val">~$1.6T</div></div>
+          <div class="fv-met"><div class="fv-met-lbl">52w High</div><div class="fv-met-val">${s52w_high:,.0f}</div></div>
+          <div class="fv-met"><div class="fv-met-lbl">52w Low</div><div class="fv-met-val">${s52w_low:,.0f}</div></div>"""
+    else:
+        target_str = _fmt(target_mean)
+        upside_str = f"{upside*100:+.1f}%" if upside is not None else "—"
+        low_str    = _fmt(target_low)
+        high_str   = _fmt(target_high)
+        peg = None
+        if fwd_pe is not None and rev_growth and rev_growth > 0.01:
+            peg = fwd_pe / (rev_growth * 100)
+        peg_str = f"{peg:.2f}x" if peg is not None else "—"
+        rev_str = f"{rev_growth*100:+.1f}%" if rev_growth is not None else "—"
+        metrics_html = f"""
+          <div class="fv-met"><div class="fv-met-lbl">Fwd P/E</div><div class="fv-met-val">{fwd_pe:.1f}x</div></div>
+          <div class="fv-met"><div class="fv-met-lbl">Rev Growth</div><div class="fv-met-val">{rev_str}</div></div>
+          <div class="fv-met"><div class="fv-met-lbl">Analysts</div><div class="fv-met-val">{analysts or '—'}</div></div>"""
+
+    # Zone-aware deployment
+    action = ov.get("zone_action", {}).get(current_zone, "Hold")
+    dep_cls = _deploy_color(action)
+
+    # Allocation footer
+    if disp == "SPYL":
+        weight_str = "28% Anchor (Z3)"
+        alloc_str  = "DCA fixed monthly"
+    elif disp == "BTC":
+        weight_str = "Legacy hold"
+        alloc_str  = "No new capital"
+    else:
+        mag6_w = ov.get("mag6_weight", 0)
+        z3_w   = mag6_w * ZONE_ALLOCATION[3]["MAG6"]
+        weight_str = f"{int(mag6_w*100)}% of Mag6 ({z3_w*100:.2f}% of active)"
+        alloc_str  = f"Buy per zone matrix"
+
+    # SPYL-specific dip trigger
+    spyl_dip_html = ""
+    if disp == "SPYL":
+        if "SPYL" in prices and len(prices["SPYL"]) > 0:
+            peak_52w = float(prices["SPYL"].iloc[-252:].max())
+            drawdown = (price - peak_52w) / peak_52w if peak_52w > 0 else 0
+            dd_pct = drawdown * 100
+            if dd_pct > -5:    dd_class, dd_msg = "fv-met-val pos", "Within normal range"
+            elif dd_pct > -10: dd_class, dd_msg = "fv-met-val", "Approaching T1 trigger"
+            elif dd_pct > -20: dd_class, dd_msg = "fv-met-val", "T1 ACTIVE — buy 2x"
+            elif dd_pct > -30: dd_class, dd_msg = "fv-met-val", "T2 ACTIVE — buy 4x"
+            else:              dd_class, dd_msg = "fv-met-val neg", "T3 ACTIVE — max deploy"
+            spyl_dip_html = f"""
+              <div class="fv-dip">
+                <div class="fv-dip-hd">DIP TRIGGER (vs 52w peak ${peak_52w:.2f})</div>
+                <div class="fv-dip-val {dd_class}">{dd_pct:+.1f}%</div>
+                <div class="fv-dip-msg">{dd_msg}</div>
+                <div class="fv-dip-scale"><span>0%</span><span>-10% T1</span><span>-20% T2</span><span>-30% T3</span></div>
+              </div>"""
+
+    btc_cycle_html = ""
+    if disp == "BTC":
+        if "BTC" in prices and len(prices["BTC"]) > 0:
+            peak_52w = float(prices["BTC"].iloc[-252:].max())
+            drawdown = (price - peak_52w) / peak_52w if peak_52w > 0 else 0
+            dd_pct = drawdown * 100
+            btc_cycle_html = f"""
+              <div class="fv-dip">
+                <div class="fv-dip-hd">CYCLE DRAWDOWN (vs 52w peak ${peak_52w:,.0f})</div>
+                <div class="fv-dip-val">{dd_pct:+.1f}%</div>
+                <div class="fv-dip-msg">Strategy: legacy hold — never add</div>
+              </div>"""
+
+    return f"""
+      <div class="fv-card" data-ticker="{disp}" data-price="{price}">
+        <div class="fv-head">
+          <div>
+            <div class="fv-tk">{disp}</div>
+            <div class="fv-co">{co}</div>
+          </div>
+          <div class="fv-bdg {badge_cls}">{badge_text}</div>
+        </div>
+        <div class="fv-price-row">
+          <div class="fv-price-block">
+            <div class="fv-price-lbl">PRICE</div>
+            <div class="fv-price-val">{_fmt(price, 2 if price < 100 else 0)}</div>
+          </div>
+          <div class="fv-price-block">
+            <div class="fv-price-lbl">TARGET</div>
+            <div class="fv-price-val">{target_str}</div>
+          </div>
+          <div class="fv-price-block">
+            <div class="fv-price-lbl">UPSIDE</div>
+            <div class="fv-price-val">{upside_str}</div>
+          </div>
+        </div>
+        <div class="fv-range">
+          <span>Low {low_str}</span><span>Current</span><span>High {high_str}</span>
+        </div>
+        <div class="fv-met-grid">{metrics_html}
+        </div>
+        <div class="fv-action">
+          <div class="fv-action-lbl">Zone {current_zone} Action</div>
+          <div class="fv-action-val {dep_cls}">{action}</div>
+        </div>
+        <div class="fv-meta">
+          <div><span>Target Weight</span><strong>{weight_str}</strong></div>
+          <div><span>Deployment</span><strong>{alloc_str}</strong></div>
+        </div>{spyl_dip_html}{btc_cycle_html}
+      </div>"""
+
+fv_cards_html = ""
+for yt, disp, co, cls in FV_CONFIG:
+    fv_cards_html += _build_card(yt, disp, co, cls)
+
+print(f"  Built {len(FV_CONFIG)} FV cards")
+# ─────────────────────────────────────────────────────────────────────────────
+# HOLDINGS VALUATION — Active vs Legacy classification
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _holding_price(ticker):
+    if ticker in live_prices: return live_prices[ticker]
+    if ticker == "GOOG" and "GOOG" in prices: return float(prices["GOOG"].iloc[-1])
+    if ticker == "GOOG" and "GOOGL" in live_prices: return live_prices["GOOGL"]
+    if ticker in prices: return float(prices[ticker].iloc[-1])
+    return None
+
+def _price_on(ticker, target_date):
+    """Price for a ticker as of a given date (or nearest prior trading day).
+    Used for YTD performance baselines."""
+    if ticker == "GOOG": ticker = "GOOG" if "GOOG" in prices else "GOOGL"
+    s = prices.get(ticker)
+    if s is None or len(s) == 0: return None
+    sub = s.loc[s.index <= pd.Timestamp(target_date)]
+    if len(sub) == 0: return None
+    return float(sub.iloc[-1])
+
+# YTD baseline date
+ytd_start = pd.Timestamp(today.year, 1, 1)
+
+# Build holding rows with classification
+holdings_rows = []
+for account, positions in HOLDINGS.items():
+    is_active = account in ACTIVE_ACCOUNTS
+    classification = "ACTIVE" if is_active else "LEGACY"
+    for ticker, holding in positions.items():
+        if ticker == "CASH":
+            holdings_rows.append({
+                "account": account, "classification": classification, "ticker": "CASH",
+                "shares": None, "avg_cost": None, "price": None,
+                "cost_basis": holding, "value": holding,
+                "pnl_ltd": 0.0, "pnl_ltd_pct": 0.0,
+                "ytd_value": holding, "ytd_pct": 0.0,
+            })
+            continue
+        shares   = holding["shares"]
+        avg_cost = holding["avg_cost"]
+        price    = _holding_price(ticker)
+        if price is None:
+            print(f"  ⚠ no price for {ticker} ({account}) — using avg cost as placeholder")
+            price = avg_cost
+        cost_basis = shares * avg_cost
+        value      = shares * price
+        pnl_ltd    = value - cost_basis
+        pnl_ltd_pct = (pnl_ltd / cost_basis * 100) if cost_basis > 0 else 0.0
+
+        # YTD: price on Jan 1, 2026 (or nearest prior trading day)
+        ytd_base_price = _price_on(ticker, ytd_start)
+        if ytd_base_price is None or ytd_base_price <= 0:
+            ytd_base_price = avg_cost  # safety fallback
+        ytd_value_at_start = shares * ytd_base_price
+        ytd_pct = ((value - ytd_value_at_start) / ytd_value_at_start * 100) if ytd_value_at_start > 0 else 0.0
+
+        holdings_rows.append({
+            "account": account, "classification": classification, "ticker": ticker,
+            "shares": shares, "avg_cost": avg_cost, "price": price,
+            "cost_basis": cost_basis, "value": value,
+            "pnl_ltd": pnl_ltd, "pnl_ltd_pct": pnl_ltd_pct,
+            "ytd_base_price": ytd_base_price, "ytd_value_at_start": ytd_value_at_start,
+            "ytd_pct": ytd_pct,
+        })
+
+# Aggregate totals by classification
+def _agg(rows, predicate):
+    sub = [r for r in rows if predicate(r)]
+    total_value = sum(r["value"] for r in sub)
+    total_cost  = sum(r["cost_basis"] for r in sub if r["ticker"] != "CASH")
+    total_pnl_ltd = sum(r["pnl_ltd"] for r in sub)
+    total_ytd_start = sum(r["ytd_value_at_start"] for r in sub if r["ticker"] != "CASH") \
+                    + sum(r["value"] for r in sub if r["ticker"] == "CASH")
+    total_ytd_pct = ((total_value - total_ytd_start) / total_ytd_start * 100) if total_ytd_start > 0 else 0.0
+    return {
+        "value": total_value, "cost": total_cost,
+        "pnl_ltd": total_pnl_ltd,
+        "pnl_ltd_pct": (total_pnl_ltd / total_cost * 100) if total_cost > 0 else 0.0,
+        "ytd_value_start": total_ytd_start,
+        "ytd_pct": total_ytd_pct,
+        "n_positions": len(sub),
+    }
+
+active_agg = _agg(holdings_rows, lambda r: r["classification"] == "ACTIVE")
+legacy_agg = _agg(holdings_rows, lambda r: r["classification"] == "LEGACY")
+total_agg  = _agg(holdings_rows, lambda r: True)
+
+active_cash  = sum(r["value"] for r in holdings_rows if r["classification"] == "ACTIVE" and r["ticker"] == "CASH")
+legacy_cash  = sum(r["value"] for r in holdings_rows if r["classification"] == "LEGACY" and r["ticker"] == "CASH")
+
+print(f"\n── Portfolio Snapshot ──")
+print(f"  ACTIVE  : ${active_agg['value']:>11,.0f} | LTD {active_agg['pnl_ltd']:+,.0f} ({active_agg['pnl_ltd_pct']:+.1f}%) | YTD {active_agg['ytd_pct']:+.2f}%")
+print(f"  LEGACY  : ${legacy_agg['value']:>11,.0f} | LTD {legacy_agg['pnl_ltd']:+,.0f} ({legacy_agg['pnl_ltd_pct']:+.1f}%) | YTD {legacy_agg['ytd_pct']:+.2f}%")
+print(f"  TOTAL   : ${total_agg['value']:>11,.0f} | LTD {total_agg['pnl_ltd']:+,.0f} ({total_agg['pnl_ltd_pct']:+.1f}%) | YTD {total_agg['ytd_pct']:+.2f}%")
+
+# ─────────────────────────────────────────────────────────────────────────────
+# MONTHLY ALLOCATION TABLE — WHOLE-PORTFOLIO matrix (strict, no overrides)
+# ─────────────────────────────────────────────────────────────────────────────
+# Logic:
+#   1. Compute current $ for each sleeve at WHOLE-PORTFOLIO level (Active + Legacy)
+#   2. BTC tracked separately, excluded from deployable universe
+#   3. Target $ = zone_matrix_% × deployable_total
+#   4. Gap = target − current. Positive = buy. Negative = over (display "OVER (locked)")
+#   5. Monthly deployment input gets pro-rata distributed across positive gaps ONLY
+#   6. SGOV gets allocated per its zone target % like any other sleeve
+#   7. No "excess cash to redeploy" logic — the matrix budget is the truth
+
+def _whole_portfolio_sleeve_value(sleeve):
+    """Sum the current $ value for a sleeve across both Active + Legacy holdings."""
+    v = 0.0
+    if sleeve == "SPYL":
+        # SPYL (IBKR) + VOO (IBKR active + Citi legacy)
+        for r in holdings_rows:
+            if r["ticker"] in ("SPYL", "VOO"):
+                v += r["value"]
+        return v
+    if sleeve in MAG6_INTERNAL:  # NVDA, MSFT, META, GOOGL, AMZN, AAPL
+        for r in holdings_rows:
+            t = r["ticker"]
+            if t == "GOOG": t = "GOOGL"  # GOOG = Class C of GOOGL; same sleeve
+            if t == sleeve:
+                v += r["value"]
+        return v
+    if sleeve == "SGOV":
+        # Only the actual SGOV ETF position counts, not plain cash.
+        # Per operational rule, plain cash is "uncommitted" and gets deployed
+        # across all sleeves (including SGOV) via the matrix.
+        for r in holdings_rows:
+            if r["ticker"] == "SGOV":
+                v += r["value"]
+        return v
+    if sleeve in ("SPACEX", "ANTHROPIC"):
+        # Earmarks not yet allocated as tagged SGOV positions
+        return 0.0
+    return 0.0
+
+# Whole-portfolio totals
+active_capital = active_agg["value"]   # display only
+legacy_capital = legacy_agg["value"]   # display only
+total_portfolio = total_agg["value"]
+
+# BTC is tracked but excluded from the deployable universe (legacy hold)
+btc_value = sum(r["value"] for r in holdings_rows if r["ticker"] == "BTC")
+deployable_total = total_portfolio - btc_value
+
+# Plain cash sitting in IBKR (uncommitted — will be deployed via matrix).
+# This is separate from the SGOV ETF position. Per Angelo's operational rule,
+# all IBKR cash should be in SGOV, so plain cash is a transitional state.
+plain_cash_ibkr = sum(r["value"] for r in holdings_rows
+                      if r["ticker"] == "CASH" and r["classification"] == "ACTIVE")
+
+zone_alloc = ZONE_ALLOCATION[current_zone]
+
+# Build allocation rows — strict matrix, no priority overrides
+alloc_rows = []
+
+# 1. SPYL anchor
+spyl_current = _whole_portfolio_sleeve_value("SPYL")
+spyl_target_pct = zone_alloc["SPYL"]
+spyl_target_dollar = deployable_total * spyl_target_pct
+alloc_rows.append({
+    "ticker": "SPYL",
+    "sleeve": "Anchor",
+    "current_dollar": spyl_current,
+    "target_pct": spyl_target_pct,
+    "target_dollar": spyl_target_dollar,
+    "gap_dollar": spyl_target_dollar - spyl_current,
+    "live_price": _holding_price("SPYL"),
+    "notes": "Includes all VOO holdings (legacy + active) at whole-portfolio level",
+    "action": FV_OVERLAY["SPYL"]["zone_action"][current_zone],
+    "row_type": "equity",
+})
+
+# 2. Mag6 — one row per ticker, target at whole-portfolio level
+mag6_envelope = zone_alloc["MAG6"]
+for ticker in MAG6_ORDER:
+    internal_w = MAG6_INTERNAL[ticker]
+    target_pct = mag6_envelope * internal_w
+    target_dollar = deployable_total * target_pct
+    current_dollar = _whole_portfolio_sleeve_value(ticker)
+    gap = target_dollar - current_dollar
+
+    # Citi covers some Mag6 names — note for context, not for action override
+    citi_overlay = ticker in ("AAPL", "GOOGL", "AMZN", "META")
+    note = "Citi legacy overlay — whole-portfolio basis" if citi_overlay else ""
+
+    alloc_rows.append({
+        "ticker": ticker,
+        "sleeve": "Mag6 Alpha",
+        "current_dollar": current_dollar,
+        "target_pct": target_pct,
+        "target_dollar": target_dollar,
+        "gap_dollar": gap,
+        "live_price": _holding_price(ticker),
+        "notes": note,
+        "action": FV_OVERLAY[ticker]["zone_action"][current_zone],
+        "row_type": "equity",
+    })
+
+# 3. SGOV parent + sub-rows (Cash Dry Powder, SpaceX, Anthropic)
+# All three are held in SGOV ETF — parent row sums them, sub-rows show the breakdown.
+sgov_current_etf = _whole_portfolio_sleeve_value("SGOV")  # actual SGOV ETF position
+cash_dp_pct = zone_alloc["CASH"]
+spx_pct     = zone_alloc["SPACEX"]
+ant_pct     = zone_alloc["ANTHROPIC"]
+sgov_parent_pct = cash_dp_pct + spx_pct + ant_pct  # combined target (e.g., 8% in Z3)
+
+cash_dp_target = deployable_total * cash_dp_pct
+spx_target     = deployable_total * spx_pct
+ant_target     = deployable_total * ant_pct
+sgov_parent_target = deployable_total * sgov_parent_pct
+
+# SGOV ETF currently holds nothing — all three sub-allocations are at $0 current
+cash_dp_current = sgov_current_etf  # all SGOV ETF treated as cash dry powder for now
+spx_current     = 0.0
+ant_current     = 0.0
+sgov_parent_current = cash_dp_current + spx_current + ant_current
+
+# SGOV PARENT row
+alloc_rows.append({
+    "ticker": "SGOV",
+    "sleeve": "Cash + Earmarks (3 sub-allocations)",
+    "current_dollar": sgov_parent_current,
+    "target_pct": sgov_parent_pct,
+    "target_dollar": sgov_parent_target,
+    "gap_dollar": sgov_parent_target - sgov_parent_current,
+    "live_price": None,
+    "notes": f"Zone {current_zone} SGOV vehicle: {cash_dp_pct*100:.0f}% dry powder + {spx_pct*100:.0f}% SpaceX + {ant_pct*100:.0f}% Anthropic",
+    "action": "Allocate per matrix",
+    "row_type": "sgov_parent",
+})
+# Sub-row 1: Cash Dry Powder
+alloc_rows.append({
+    "ticker": "Cash Dry Powder",
+    "sleeve": "SGOV sub-allocation",
+    "current_dollar": cash_dp_current,
+    "target_pct": cash_dp_pct,
+    "target_dollar": cash_dp_target,
+    "gap_dollar": cash_dp_target - cash_dp_current,
+    "live_price": None,
+    "notes": "Reserve for dip triggers and zone transitions",
+    "action": "Allocate per matrix",
+    "row_type": "sgov_sub",
+})
+# Sub-row 2: SpaceX Earmark
+alloc_rows.append({
+    "ticker": "SpaceX",
+    "sleeve": "SGOV sub-allocation",
+    "current_dollar": spx_current,
+    "target_pct": spx_pct,
+    "target_dollar": spx_target,
+    "gap_dollar": spx_target - spx_current,
+    "live_price": None,
+    "notes": "Hold as tagged SGOV until SpaceX IPO",
+    "action": "Hold in SGOV",
+    "row_type": "sgov_sub",
+})
+# Sub-row 3: Anthropic Earmark
+alloc_rows.append({
+    "ticker": "Anthropic",
+    "sleeve": "SGOV sub-allocation",
+    "current_dollar": ant_current,
+    "target_pct": ant_pct,
+    "target_dollar": ant_target,
+    "gap_dollar": ant_target - ant_current,
+    "live_price": None,
+    "notes": "Hold as tagged SGOV until Anthropic IPO",
+    "action": "Hold in SGOV",
+    "row_type": "sgov_sub",
+})
+
+# Sort order (top to bottom):
+#   1. SGOV parent row
+#   2. SGOV sub-rows (Cash Dry Powder, SpaceX, Anthropic) in that fixed order
+#   3. Equity rows: positive gaps (BUY) first by size descending, then OVER by size ascending
+SGOV_SUB_ORDER = {"Cash Dry Powder": 1, "SpaceX": 2, "Anthropic": 3}
+
+def _sort_key(r):
+    rt = r.get("row_type", "equity")
+    if rt == "sgov_parent":
+        return (0, 0, 0)        # very first
+    if rt == "sgov_sub":
+        return (1, SGOV_SUB_ORDER.get(r["ticker"], 99), 0)  # parent's subs in fixed order
+    # Equity rows
+    has_gap = -(r["gap_dollar"] > 100)   # positive gaps first within equity group
+    return (2, has_gap, -r["gap_dollar"])
+
+alloc_rows.sort(key=_sort_key)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PERFORMANCE CHART DATA — SPYL · MAG6 · PORTFOLIO
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Build PORTFOLIO synthetic price series (active + legacy combined, indexed to 100)
+def _build_portfolio_series():
+    """Construct a synthetic 'My Portfolio' series weighted by current holdings."""
+    # Use current value weights across all holdings as the constant weighting
+    weights = {}
+    for r in holdings_rows:
+        if r["ticker"] == "CASH": continue
+        t = r["ticker"]
+        if t == "GOOG": t = "GOOGL"  # use GOOGL price series for GOOG
+        if t == "VOO":  t = "SPY"    # use SPY price series for VOO (parallel)
+        weights[t] = weights.get(t, 0) + r["value"]
+    total_w = sum(weights.values())
+    if total_w == 0: return None
+    for t in weights:
+        weights[t] /= total_w
+
+    # Build weighted index
+    components = []
+    for t, w in weights.items():
+        s = prices.get(t)
+        if s is None or len(s) < 20: continue
+        components.append((s / s.iloc[0] * 100) * w)
+    if not components: return None
+    basket = pd.concat(components, axis=1).sum(axis=1)
+    return basket / basket.iloc[0] * 100
+
+prices["PORTFOLIO"] = _build_portfolio_series()
+if prices["PORTFOLIO"] is None:
+    print("  ⚠ Portfolio synthetic series failed — using MAG6 as proxy")
+    prices["PORTFOLIO"] = prices.get("MAG6")
+
 horizons_cfg = {
     "7D":  {"back": pd.DateOffset(days=7),   "fwd": pd.DateOffset(days=7),   "kind":"gbm"},
     "30D": {"back": pd.DateOffset(days=30),  "fwd": pd.DateOffset(days=30),  "kind":"gbm"},
     "6M":  {"back": pd.DateOffset(months=6), "fwd": pd.DateOffset(months=6), "kind":"gbm"},
-    "YTD": {"back": None,                    "fwd": pd.DateOffset(months=6), "kind":"analyst"},
-    "1Y":  {"back": pd.DateOffset(years=1),  "fwd": pd.DateOffset(years=1),  "kind":"analyst"},
+    "YTD": {"back": None,                    "fwd": pd.DateOffset(months=6), "kind":"cagr"},
+    "1Y":  {"back": pd.DateOffset(years=1),  "fwd": pd.DateOffset(years=1),  "kind":"cagr"},
     "5Y":  {"back": pd.DateOffset(years=5),  "fwd": pd.DateOffset(years=5),  "kind":"cagr"},
 }
 
@@ -634,7 +1227,7 @@ for hkey, hcfg in horizons_cfg.items():
     kind     = hcfg["kind"]
     h_data   = {}
 
-    for key in ["SPY","MAG7","TSLA","BTC"]:
+    for key in ["SPYL", "MAG6", "PORTFOLIO"]:
         raw_s = prices.get(key)
         if raw_s is None: continue
 
@@ -645,17 +1238,14 @@ for hkey, hcfg in horizons_cfg.items():
         hist_pts = [(str(d.date()), round(float(v), 2)) for d, v in normed.items()]
 
         lv    = float(normed.iloc[-1])
-        lp    = float(sliced.iloc[-1])   # last raw price
+        lp    = float(sliced.iloc[-1])
         ld    = normed.index[-1].to_pydatetime()
         rate  = FWD_CAGR[key]
         vol   = VOLS[key]
         seed  = abs(hash(f"{key}:{hkey}")) % (2**31)
-        tgt   = ANALYST_TARGETS.get(key)
 
         if kind == "cagr":
             proj_pts = proj_cagr(lv, ld, proj_end, rate)
-        elif kind == "analyst" and tgt:
-            proj_pts = proj_analyst(lv, lp, tgt, ld, proj_end)
         else:
             proj_pts = proj_gbm(lv, ld, proj_end, rate, vol, seed)
 
@@ -669,514 +1259,9 @@ for hkey, hcfg in horizons_cfg.items():
         yrs = (normed.index[-1] - normed.index[0]).days / 365.25
         entry["cagr"] = round((float(normed.iloc[-1]/normed.iloc[0])**(1/yrs)-1)*100, 1) if yrs > 0.1 else None
 
-        if key in ("TSLA","BTC") and proj_pts:
-            u, l = vol_bands(proj_pts, vol)
-            entry["band_upper"] = u
-            entry["band_lower"] = l
-
         h_data[key] = entry
 
     all_data[hkey] = h_data
-
-# ── FAIR VALUE CARDS ──────────────────────────────────────────────────────────
-print("\nFetching fair value data...")
-
-FV_CONFIG = [
-    ("NVDA",    "NVDA",  "NVIDIA Corporation",      "stock"),
-    ("MSFT",    "MSFT",  "Microsoft Corporation",   "stock"),
-    ("META",    "META",  "Meta Platforms Inc.",     "stock"),
-    ("GOOGL",   "GOOGL", "Alphabet Inc.",           "stock"),
-    ("AMZN",    "AMZN",  "Amazon.com Inc.",         "stock"),
-    ("AAPL",    "AAPL",  "Apple Inc.",              "stock"),
-    ("TSLA",    "TSLA",  "Tesla Inc.",              "stock"),
-    ("SPYL.L",  "SPYL",  "SPDR S&P 500 UCITS ETF",  "etf"),
-    ("BTC-USD", "BTC",   "Bitcoin",                 "crypto"),
-]
-
-def _fetch_fv(yt):
-    """Fair value info — Twelve Data /price primary, yfinance .info fallback,
-    history-derived fallback as last resort. Returns dict shaped like yfinance .info."""
-    info = {}
-
-    # ── Phase 1: Twelve Data /price (works on free tier, reliable on Actions) ──
-    td_price = td_quote(yt)
-    if td_price is not None:
-        info["regularMarketPrice"] = float(td_price)
-        info["currentPrice"]       = float(td_price)
-        # Twelve Data /price doesn't return 52w high/low — derive from chart history
-        hist_key = "BTC" if yt == "BTC-USD" else ("ETH" if yt == "ETH-USD" else
-                   ("SPYL" if yt == "SPYL.L" else yt))
-        if hist_key in prices and len(prices[hist_key]) > 0:
-            info["fiftyTwoWeekHigh"] = float(prices[hist_key].tail(252).max())
-            info["fiftyTwoWeekLow"]  = float(prices[hist_key].tail(252).min())
-            info["previousClose"]    = float(prices[hist_key].iloc[-1])
-        print(f"  {yt} fv: TD quote ${info['regularMarketPrice']:.2f}")
-        return info
-
-    # ── Phase 2: yfinance .info (likely fails on Actions but harmless to try) ──
-    try:
-        yf_info = yf.Ticker(yt).info or {}
-        if yf_info.get("regularMarketPrice") or yf_info.get("currentPrice"):
-            print(f"  {yt} fv: yfinance .info success")
-            return yf_info
-    except Exception:
-        pass  # silent — we expect this to fail on Actions
-
-    # ── Phase 3: derive from chart history ──
-    hist_key = "BTC" if yt == "BTC-USD" else ("ETH" if yt == "ETH-USD" else
-               ("SPYL" if yt == "SPYL.L" else yt))
-    if hist_key in prices and len(prices[hist_key]) > 0:
-        info["regularMarketPrice"] = float(prices[hist_key].iloc[-1])
-        info["fiftyTwoWeekHigh"]   = float(prices[hist_key].tail(252).max())
-        info["fiftyTwoWeekLow"]    = float(prices[hist_key].tail(252).min())
-        print(f"  {yt} fv: history fallback ${info['regularMarketPrice']:.2f}")
-    else:
-        print(f"  {yt} fv: NO DATA — card will show placeholder")
-    return info
-
-def _fmt(v, dec=2):
-    if v is None: return "—"
-    if abs(v) >= 1e12: return f"${v/1e12:.2f}T"
-    if abs(v) >= 1e9:  return f"${v/1e9:.1f}B"
-    if abs(v) >= 1e6:  return f"${v/1e6:.1f}M"
-    return f"${v:,.{dec}f}" if dec > 0 else f"${int(round(v)):,}"
-
-def _badge(rec, upside, disp):
-    """Return (css_class, label) — with special handling for SPYL/BTC."""
-    if disp == "SPYL":
-        return "fv-dca", "DCA BUY"
-    if disp == "BTC":
-        return "fv-strat", "STRATEGIC HOLD"
-    r = (rec or "").lower()
-    if "strong" in r and "buy" in r: return "fv-buy", "Strong Buy"
-    if "buy" in r:                   return "fv-buy", "Buy"
-    if "hold" in r or "neutral" in r: return "fv-hold", "Hold"
-    if "sell" in r:                  return "fv-cau", "Sell"
-    if upside is None: return "fv-hold", "—"
-    if upside >= 25:   return "fv-buy", "Strong Buy"
-    if upside >= 10:   return "fv-buy", "Buy"
-    if upside >= -5:   return "fv-hold", "Hold"
-    return "fv-cau", "Sell"
-
-def _deploy_color(action):
-    a = action.lower()
-    if "aggressively" in a or "max" in a or "dca" in a: return "dep-green"
-    if "systematic" in a or "slowly" in a or "small" in a: return "dep-amber"
-    if "do not" in a or "overvalued" in a: return "dep-red"
-    if "hold" in a: return "dep-amber"
-    return "dep-neutral"
-
-live_prices = {}   # disp -> live price; populated by _build_card
-
-def _build_card(yt, disp, co, cls):
-    info   = _fetch_fv(yt)
-    ov     = FV_OVERLAY.get(disp, {})
-
-    # ── Layer manually-maintained analyst fields onto info ──────────────────
-    # These come from FV_OVERLAY (updated monthly) since Twelve Data free tier
-    # doesn't include analyst targets, P/E, growth, or analyst counts.
-    # Only fill if API didn't already return a value (yfinance .info wins if it works).
-    for ov_key, info_key in [
-        ("target_mean",    "targetMeanPrice"),
-        ("target_low",     "targetLowPrice"),
-        ("target_high",    "targetHighPrice"),
-        ("fwd_pe",         "forwardPE"),
-        ("rev_growth",     "revenueGrowth"),
-        ("analysts",       "numberOfAnalystOpinions"),
-        ("recommendation", "recommendationKey"),
-    ]:
-        if ov.get(ov_key) is not None and not info.get(info_key):
-            info[info_key] = ov[ov_key]
-    price  = info.get("regularMarketPrice") or info.get("currentPrice")
-    dec    = 0 if cls == "crypto" else 2
-
-    # Save live price for holdings valuation (fall back to chart price if .info fails)
-    if price:
-        live_prices[disp] = float(price)
-    elif disp in prices:
-        live_prices[disp] = float(prices[disp].iloc[-1])
-
-    # ── Target & upside ──────────────────────────────────────────────────
-    if disp == "SPYL":
-        target  = ov.get("spyl_target", 18.0)
-        low_t   = info.get("fiftyTwoWeekLow",  14.80)
-        high_t  = ov.get("spyl_target_hi", 18.50)
-    elif disp == "BTC":
-        target  = ov.get("s2f_low", 100000)
-        low_t   = info.get("fiftyTwoWeekLow",  70000)
-        high_t  = ov.get("s2f_high", 150000)
-    else:
-        target  = info.get("targetMeanPrice")
-        low_t   = info.get("targetLowPrice")  or info.get("fiftyTwoWeekLow")
-        high_t  = info.get("targetHighPrice") or info.get("fiftyTwoWeekHigh")
-
-    upside   = ((target/price - 1)*100) if (price and target) else None
-    fill_pct = 50.0
-    if price and low_t and high_t and high_t > low_t:
-        fill_pct = max(0, min(100, (price - low_t) / (high_t - low_t) * 100))
-
-    bar_color = "#2563eb" if (upside or 0) >= 10 else "#16a34a" if (upside or 0) >= 0 else "#dc2626"
-    bcls, btxt = _badge(info.get("recommendationKey"), upside, disp)
-
-    # ── Core metrics row ─────────────────────────────────────────────────
-    if cls == "crypto":
-        m = [("Market Cap", _fmt(info.get("marketCap"), 0)),
-             ("52w High",   _fmt(info.get("fiftyTwoWeekHigh"), 0)),
-             ("52w Low",    _fmt(info.get("fiftyTwoWeekLow"),  0))]
-    elif cls == "etf":
-        dy = info.get("yield") or info.get("dividendYield")
-        m = [("Div Yield",  f"{dy*100:.2f}%" if dy else "—"),
-             ("52w High",   _fmt(info.get("fiftyTwoWeekHigh"), 2)),
-             ("52w Low",    _fmt(info.get("fiftyTwoWeekLow"),  2))]
-    else:
-        rg = info.get("revenueGrowth")
-        m = [("Fwd P/E",    f"{info['forwardPE']:.1f}x" if info.get("forwardPE") else "—"),
-             ("Rev Growth", f"{rg*100:+.1f}%" if rg is not None else "—"),
-             ("Analysts",   str(info.get("numberOfAnalystOpinions") or "—"))]
-
-    # ── Valuation overlay ─────────────────────────────────────────────────
-    fwd_pe   = info.get("forwardPE")
-    rev_g    = info.get("revenueGrowth")
-    hist_pe  = ov.get("hist_pe")
-    peg      = round(fwd_pe / (rev_g * 100), 2) if (fwd_pe and rev_g and rev_g > 0) else None
-    peg_txt  = f"{peg:.2f}x" if peg is not None else "—"
-
-    pe_vs_hist_txt = ""
-    if fwd_pe and hist_pe:
-        diff = ((fwd_pe / hist_pe) - 1) * 100
-        arrow = "↓" if diff < 0 else "↑"
-        pe_vs_hist_txt = f"{arrow}{abs(diff):.0f}% vs 5yr avg"
-
-    # ── Zone-aware deployment ─────────────────────────────────────────────
-    deploy_action = ov.get("zone_action", {}).get(current_zone, "—")
-    dep_cls       = _deploy_color(deploy_action)
-    final_weight  = ov.get("weight", "—")
-
-    # Monthly allocation display
-    b1_w   = ov.get("b1_w", 0.0)
-    bucket = ov.get("bucket", 0)
-    if bucket == 1:
-        # Zone 3 = 60% of monthly deployment → Bucket 1
-        b1_deploy_frac = {"1":0.25,"2":0.40,"3":0.60,"4":0.65,"5":0.70}.get(str(current_zone), 0.60)
-        monthly_alloc  = b1_w * b1_deploy_frac * 50000
-        alloc_txt = f"~${monthly_alloc:,.0f}/mo (Zone {current_zone})"
-    elif bucket == 2:
-        monthly_alloc = 0.20 * 50000
-        alloc_txt = f"~${monthly_alloc:,.0f}/mo fixed"
-    elif bucket == 3:
-        alloc_txt = "5% total portfolio"
-    else:
-        alloc_txt = "No new capital"
-
-    # ── SPYL-specific dip trigger ─────────────────────────────────────────
-    spyl_dip_html = ""
-    if disp == "SPYL" and price:
-        s52h = info.get("fiftyTwoWeekHigh") or ov.get("s52w_high", 17.50)
-        drawdown_pct = (price / s52h - 1) * 100 if s52h else 0
-        bar_fill = min(100, abs(drawdown_pct) / 30 * 100)
-        t1_pct = 10; t2_pct = 20; t3_pct = 30
-        t1_fill = t1_pct/30*100; t2_fill = t2_pct/30*100
-        trigger_color = "#dc2626" if abs(drawdown_pct) >= 10 else "#d97706" if abs(drawdown_pct) >= 7 else "#16a34a"
-        trigger_label = "⚠ TRANCHE 1 TRIGGERED" if abs(drawdown_pct) >= 10 else (
-                        "⚡ APPROACHING T1" if abs(drawdown_pct) >= 7 else "✓ Within normal range")
-        spyl_dip_html = f"""
-      <div class="fv-dip">
-        <div class="fv-dip-title">DIP TRIGGER MONITOR</div>
-        <div class="fv-dip-vals">
-          <span>Drawdown from peak: <strong style="color:{trigger_color}">{drawdown_pct:.1f}%</strong></span>
-          <span style="color:{trigger_color};font-size:10px">{trigger_label}</span>
-        </div>
-        <div class="fv-dip-bar">
-          <div class="fv-dip-fill" style="width:{bar_fill:.1f}%;background:{trigger_color}"></div>
-          <div class="fv-dip-mark" style="left:{t1_fill:.1f}%" title="T1 trigger −10%"></div>
-          <div class="fv-dip-mark" style="left:{t2_fill:.1f}%" title="T2 trigger −20%"></div>
-        </div>
-        <div class="fv-dip-labels">
-          <span>0%</span><span>−10% T1</span><span>−20% T2</span><span>−30% T3</span>
-        </div>
-      </div>"""
-
-    # ── BTC-specific cycle note ───────────────────────────────────────────
-    btc_cycle_html = ""
-    if disp == "BTC":
-        s52h = info.get("fiftyTwoWeekHigh") or 125000
-        cycle_dd = (price / s52h - 1) * 100 if (price and s52h) else 0
-        s2f_lo = ov.get("s2f_low", 100000)
-        s2f_hi = ov.get("s2f_high", 150000)
-        btc_cycle_html = f"""
-      <div class="fv-btcnote">
-        <div class="fv-btcrow"><span>S2F Model Target</span><span>${s2f_lo:,.0f} – ${s2f_hi:,.0f}</span></div>
-        <div class="fv-btcrow"><span>Cycle drawdown</span><span style="color:#dc2626">{cycle_dd:.1f}% from peak</span></div>
-        <div class="fv-btcrow"><span>Strategy</span><span style="color:#d97706">Hold — never add</span></div>
-      </div>"""
-
-    upside_txt = f"{upside:+.1f}%" if upside is not None else "—"
-    upside_cls = "fv-pos" if (upside or 0) >= 0 else "fv-neg"
-    target_lbl = "S2F TARGET" if disp == "BTC" else ("WALL ST TARGET" if disp == "SPYL" else "TARGET")
-    target_txt = _fmt(target, dec) if target else "—"
-    price_txt  = _fmt(price,  dec) if price else "—"
-    low_txt    = _fmt(low_t,  dec) if low_t else "—"
-    high_txt   = _fmt(high_t, dec) if high_t else "—"
-
-    print(f"  {disp}: {price_txt} → {target_txt} ({upside_txt}) | Zone{current_zone}: {deploy_action}")
-
-    return f"""
-    <div class="fv-card" data-ticker="{disp}" data-price="{price or 0}" data-bucket="{bucket}" data-b1w="{b1_w}">
-      <div class="fv-head">
-        <div><div class="fv-tk">{disp}</div><div class="fv-co">{co}</div></div>
-        <span class="fv-bdg {bcls}">{btxt}</span>
-      </div>
-      <div class="fv-prow">
-        <div class="fv-pblk"><div class="fv-plbl">PRICE</div><div class="fv-pval">{price_txt}</div></div>
-        <div class="fv-pblk"><div class="fv-plbl">{target_lbl}</div><div class="fv-pval {upside_cls}">{target_txt}</div></div>
-        <div class="fv-pblk"><div class="fv-plbl">UPSIDE</div><div class="fv-pval {upside_cls}">{upside_txt}</div></div>
-      </div>
-      <div class="fv-bar">
-        <div class="fv-blbl"><span>Low {low_txt}</span><span>Current</span><span>High {high_txt}</span></div>
-        <div class="fv-bg"><div class="fv-fl" style="width:{fill_pct:.0f}%;background:{bar_color}"></div></div>
-      </div>
-      <div class="fv-mtx">
-        <div class="fv-mbox"><div class="fv-mlbl">{m[0][0]}</div><div class="fv-mval">{m[0][1]}</div></div>
-        <div class="fv-mbox"><div class="fv-mlbl">{m[1][0]}</div><div class="fv-mval">{m[1][1]}</div></div>
-        <div class="fv-mbox"><div class="fv-mlbl">{m[2][0]}</div><div class="fv-mval">{m[2][1]}</div></div>
-      </div>
-      <div class="fv-overlay">
-        <div class="fv-orow">
-          <span class="fv-olbl">Zone {current_zone} Action</span>
-          <span class="fv-oval {dep_cls}">{deploy_action}</span>
-        </div>
-        <div class="fv-orow">
-          <span class="fv-olbl">PEG Ratio</span>
-          <span class="fv-oval">{peg_txt}{"  " + pe_vs_hist_txt if pe_vs_hist_txt else ""}</span>
-        </div>
-        <div class="fv-orow">
-          <span class="fv-olbl">Target Weight</span>
-          <span class="fv-oval">{final_weight}</span>
-        </div>
-        <div class="fv-orow">
-          <span class="fv-olbl">Monthly Alloc</span>
-          <span class="fv-oval">{alloc_txt}</span>
-        </div>
-      </div>{spyl_dip_html}{btc_cycle_html}
-    </div>"""
-
-# Build cards with rate-limit pacing — Twelve Data free tier allows 8 calls/min.
-# Each _build_card() may call td_quote() once. Sleep 8 seconds between cards
-# (after the first 4) to keep the running rate under 8/min when combined with
-# any candle calls already used within the same minute window.
-print(f"\nBuilding {len(FV_CONFIG)} fair value cards (with rate-limit pacing)...")
-_card_html_parts = []
-for idx, c in enumerate(FV_CONFIG):
-    if idx >= 4:
-        # First 4 calls fit in the per-minute budget alongside spillover from candles;
-        # after that, sleep to ensure we don't trip the 8/min limit.
-        time.sleep(8)
-    _card_html_parts.append(_build_card(*c))
-fv_cards_html = "".join(_card_html_parts)
-
-# ── PORTFOLIO HOLDINGS VALUATION ─────────────────────────────────────────────
-# Use live_prices populated by _build_card. For tickers not in FV_CONFIG (VOO, GOOG, ETH),
-# fall back to the chart-history last close.
-def _holding_price(ticker):
-    """Best-available live price for a holdings ticker."""
-    if ticker in live_prices:
-        return live_prices[ticker]
-    # GOOG ≈ GOOGL price (different share class but tracks closely)
-    if ticker == "GOOG" and "GOOG" in prices:
-        return float(prices["GOOG"].iloc[-1])
-    if ticker in prices:
-        return float(prices[ticker].iloc[-1])
-    # GOOG fallback to GOOGL if separate fetch failed
-    if ticker == "GOOG" and "GOOGL" in live_prices:
-        return live_prices["GOOGL"]
-    return None
-
-# Build per-account holdings + totals
-holdings_rows  = []   # flat list for the snapshot table
-account_totals = {}   # account -> {value, cost, cash}
-total_value    = 0.0
-total_cost     = 0.0
-total_cash     = 0.0
-
-for account, positions in HOLDINGS.items():
-    acc_value = 0.0
-    acc_cost  = 0.0
-    acc_cash  = 0.0
-    for ticker, holding in positions.items():
-        if ticker == "CASH":
-            acc_cash   += holding
-            acc_value  += holding
-            total_cash += holding
-            holdings_rows.append({
-                "account": account, "ticker": "CASH",
-                "shares": None, "avg_cost": None, "price": None,
-                "cost_basis": holding, "value": holding, "pnl": 0.0, "pnl_pct": 0.0,
-            })
-            continue
-        shares   = holding["shares"]
-        avg_cost = holding["avg_cost"]
-        price    = _holding_price(ticker)
-        if price is None:
-            print(f"  ⚠ no price for {ticker} ({account}) — using avg cost as placeholder")
-            price = avg_cost
-        cost_basis = shares * avg_cost
-        value      = shares * price
-        pnl        = value - cost_basis
-        pnl_pct    = (pnl / cost_basis * 100) if cost_basis > 0 else 0.0
-        acc_value += value
-        acc_cost  += cost_basis
-        holdings_rows.append({
-            "account": account, "ticker": ticker,
-            "shares": shares, "avg_cost": avg_cost, "price": price,
-            "cost_basis": cost_basis, "value": value, "pnl": pnl, "pnl_pct": pnl_pct,
-        })
-    account_totals[account] = {"value": acc_value, "cost": acc_cost, "cash": acc_cash}
-    total_value += acc_value
-    total_cost  += acc_cost
-
-total_pnl     = total_value - total_cost - total_cash   # cash isn't a "position" with P&L
-total_pnl_pct = (total_pnl / (total_cost) * 100) if total_cost > 0 else 0.0
-
-print(f"\n── Portfolio Snapshot ──")
-print(f"  Total value: ${total_value:,.2f}")
-print(f"  Total cost:  ${total_cost:,.2f}")
-print(f"  Total cash:  ${total_cash:,.2f}")
-print(f"  Unrealized:  ${total_pnl:+,.2f} ({total_pnl_pct:+.2f}%)")
-
-# ── BUILD HOLDINGS SNAPSHOT TABLE HTML ───────────────────────────────────────
-def _fmt_usd(v, dec=2):
-    if v is None: return "—"
-    return f"${v:,.{dec}f}" if dec > 0 else f"${int(round(v)):,}"
-
-def _fmt_shares(s):
-    if s is None: return "—"
-    if s < 1: return f"{s:.4f}"
-    return f"{int(s):,}" if s == int(s) else f"{s:,.2f}"
-
-ACCOUNT_LABELS = {
-    "IBKR":      "IBKR",
-    "CITI_401K": "Citi 401k",
-    "CITI_ROTH": "Citi Roth",
-    "CITI_BROK": "Citi Brokerage",
-    "CRYPTO":    "Crypto",
-}
-
-snapshot_rows_html = ""
-for r in holdings_rows:
-    pnl_cls  = "pos" if r["pnl"] >= 0 else "neg"
-    sign     = "+" if r["pnl"] >= 0 else ""
-    is_cash  = r["ticker"] == "CASH"
-    acc_lbl  = ACCOUNT_LABELS.get(r["account"], r["account"])
-    snapshot_rows_html += f"""
-        <tr class="hold-row{' hold-cash' if is_cash else ''}">
-          <td class="hold-acc">{acc_lbl}</td>
-          <td class="hold-tk">{r['ticker']}</td>
-          <td class="hold-num">{_fmt_shares(r['shares'])}</td>
-          <td class="hold-num">{_fmt_usd(r['avg_cost'])}</td>
-          <td class="hold-num">{_fmt_usd(r['price'])}</td>
-          <td class="hold-num">{_fmt_usd(r['cost_basis'])}</td>
-          <td class="hold-num"><strong>{_fmt_usd(r['value'])}</strong></td>
-          <td class="hold-num {pnl_cls}">{sign}{_fmt_usd(r['pnl']) if not is_cash else '—'}</td>
-          <td class="hold-num {pnl_cls}">{(sign + f"{r['pnl_pct']:.1f}%") if not is_cash else '—'}</td>
-        </tr>"""
-
-# Account subtotals row
-account_subtotal_html = ""
-for acc, t in account_totals.items():
-    acc_lbl = ACCOUNT_LABELS.get(acc, acc)
-    account_subtotal_html += f"""
-      <div class="acc-pill">
-        <div class="acc-name">{acc_lbl}</div>
-        <div class="acc-val">{_fmt_usd(t['value'], 0)}</div>
-      </div>"""
-
-# ── DEPLOYMENT GAPS TRACKER ──────────────────────────────────────────────────
-# For each ticker in TARGET_WEIGHTS, compute current weight vs target weight.
-# Sum holdings of that ticker across all accounts.
-def _holdings_for_ticker(t):
-    """Sum holdings of ticker `t` across all accounts.
-    Special case: GOOG (Class C) and GOOGL (Class A) are the same equity for
-    allocation purposes — they have the same price within ~1%, same business.
-    A holding in either bucket counts toward the target for the other."""
-    # Build the list of "equivalent" ticker symbols
-    if t == "GOOGL":
-        equivalent_tickers = {"GOOGL", "GOOG"}
-    elif t == "GOOG":
-        equivalent_tickers = {"GOOG", "GOOGL"}
-    else:
-        equivalent_tickers = {t}
-
-    total = 0.0
-    for account, positions in HOLDINGS.items():
-        for ticker, h in positions.items():
-            if ticker in equivalent_tickers and isinstance(h, dict):
-                # Use the actual ticker's own price, not t's price
-                # (GOOG and GOOGL prices differ slightly even though correlated)
-                price = _holding_price(ticker) or 0
-                total += h["shares"] * price
-    return total
-
-gaps_rows = []
-for ticker, target_w in TARGET_WEIGHTS.items():
-    cur_value   = _holdings_for_ticker(ticker)
-    cur_weight  = (cur_value / total_value) if total_value > 0 else 0
-    target_val  = target_w * total_value
-    gap_dollar  = target_val - cur_value
-    gap_pct     = (target_w - cur_weight) * 100  # in percentage points
-    progress    = (cur_weight / target_w * 100) if target_w > 0 else 0
-    gaps_rows.append({
-        "ticker": ticker,
-        "current_value": cur_value,
-        "current_weight": cur_weight * 100,
-        "target_weight": target_w * 100,
-        "target_value":  target_val,
-        "gap_dollar":    gap_dollar,
-        "gap_pct":       gap_pct,
-        "progress":      min(progress, 150),   # cap visual at 150% over-allocation
-    })
-
-gaps_rows_html = ""
-for g in gaps_rows:
-    gap_cls    = "pos" if g["gap_dollar"] <= 0 else "neg"
-    gap_sign   = "" if g["gap_dollar"] <= 0 else "+"
-    bar_color  = "#15803d" if g["progress"] >= 95 else "#b45309" if g["progress"] >= 60 else "#b91c1c"
-    bar_pct    = min(g["progress"], 100)
-    gaps_rows_html += f"""
-        <tr>
-          <td class="gap-tk">{g['ticker']}</td>
-          <td class="hold-num">{_fmt_usd(g['current_value'], 0)}</td>
-          <td class="hold-num">{g['current_weight']:.1f}%</td>
-          <td class="hold-num">{g['target_weight']:.1f}%</td>
-          <td class="hold-num">{_fmt_usd(g['target_value'], 0)}</td>
-          <td class="hold-num {gap_cls}">{gap_sign}{_fmt_usd(g['gap_dollar'], 0)}</td>
-          <td>
-            <div class="gap-bar">
-              <div class="gap-fill" style="width:{bar_pct:.1f}%;background:{bar_color}"></div>
-            </div>
-            <div class="gap-pct">{g['progress']:.0f}% of target</div>
-          </td>
-        </tr>"""
-
-# ── ACTION TABLE ROWS (Python-generated, JS makes interactive) ────────────────
-# Build per-ticker action data for the Monday table
-action_rows_data = []
-for yt, disp, co, cls in FV_CONFIG:
-    ov = FV_OVERLAY.get(disp, {})
-    bucket = ov.get("bucket", 0)
-    b1_w   = ov.get("b1_w", 0.0)
-    action = ov.get("zone_action", {}).get(current_zone, "Hold")
-    dep_cls = _deploy_color(action)
-    # Urgency
-    if "aggressively" in action.lower() or "max" in action.lower(): urgency = "HIGH"
-    elif "systematic" in action.lower() or "slowly" in action.lower() or "dca" in action.lower(): urgency = "MEDIUM"
-    elif "do not" in action.lower() or "strategic hold" in action.lower(): urgency = "SKIP"
-    else: urgency = "LOW"
-    action_rows_data.append({
-        "ticker": disp, "bucket": bucket, "b1_w": b1_w,
-        "action": action, "dep_cls": dep_cls, "urgency": urgency,
-    })
-
-action_rows_json = json.dumps(action_rows_data, separators=(",",":"))
 
 # ── TIMESTAMP ─────────────────────────────────────────────────────────────────
 now_manila    = datetime.utcnow() + timedelta(hours=8)
@@ -1190,21 +1275,195 @@ payload = json.dumps({
     "yc":           {"horizons": yc_data, "current_spread": round(current_spread, 4),
                      "current_zone": current_zone, "ou_mu": OU_MU,
                      "zone_boundaries": ZONE_BOUNDARIES},
-    "zone_deploy":  ZONE_DEPLOY,
+    "zone_alloc":   {str(k): v for k, v in ZONE_ALLOCATION.items()},
     "zone_meta":    {str(k): v for k, v in ZONE_META.items()},
-    "action_rows":  action_rows_data,
+    "alloc_rows":   alloc_rows,
+    "active_capital": active_capital,
+    "plain_cash":   plain_cash_ibkr,
+    "monthly_input": 12820,
     "fetched_at":   fetched_at,
 }, separators=(",",":"))
 
 print(f"\nGenerating index.html...")
+# ─────────────────────────────────────────────────────────────────────────────
+# HTML RENDERING
+# ─────────────────────────────────────────────────────────────────────────────
 
-# ── HTML ──────────────────────────────────────────────────────────────────────
 zone_color  = ZONE_META[current_zone]["color"]
 zone_bg     = ZONE_META[current_zone]["bg"]
 zone_label  = ZONE_META[current_zone]["label"]
 zone_desc   = ZONE_META[current_zone]["desc"]
-zone_deploy = ZONE_DEPLOY[current_zone]
 spread_fmt  = f"{current_spread:+.2f}%"
+
+# ── HTML formatters ──
+def _fmt_usd(v, dec=0):
+    if v is None: return "—"
+    try:
+        if dec == 0: return f"${int(round(v)):,}"
+        return f"${v:,.{dec}f}"
+    except Exception:
+        return "—"
+
+def _fmt_shares(s):
+    if s is None: return "—"
+    if s < 1: return f"{s:.4f}"
+    return f"{int(s):,}" if s == int(s) else f"{s:,.2f}"
+
+def _fmt_pct(v, dec=1):
+    if v is None: return "—"
+    return f"{v:+.{dec}f}%"
+
+# ── Build allocation table rows HTML (initial render — JS re-renders on input change) ──
+# LOGIC: Matrix-weight allocation renormalized to under-target ("open") sleeves only.
+#
+# Special handling for SGOV parent + sub-rows:
+#   - The SGOV "parent" row (row_type=sgov_parent) is a display-only aggregator.
+#   - The 3 sub-rows (row_type=sgov_sub) are the actual matrix sleeves at 4%/2%/2%.
+#   - Renormalization uses SUB-rows + equity rows (NOT the parent — would double-count).
+#   - Parent's Allocation $ = sum of its 3 sub-rows' allocations (computed after).
+#
+# Default deployment = monthly input ($12,820) + plain IBKR cash (deployed in full).
+default_monthly = 12820.0
+default_deploy = default_monthly + plain_cash_ibkr   # full pool
+
+# Identify open sleeves (positive gap) — EXCLUDING sgov_parent (sub-rows carry the math)
+_open_rows = [r for r in alloc_rows
+              if r["gap_dollar"] > 100 and r.get("row_type") != "sgov_parent"]
+_closed_rows = [r for r in alloc_rows if r["gap_dollar"] <= 100 and r.get("row_type") != "sgov_parent"]
+
+# Sum of matrix target percentages for OPEN sleeves (used for renormalization)
+_open_matrix_total = sum(r["target_pct"] for r in _open_rows)
+
+# Compute allocation $ per row by pure matrix weight (no gap cap).
+# Per user preference: always deploy the full input, allow slight overshoot
+# of individual sleeves rather than leaving cash unallocated.
+_alloc_amts = {}
+for r in _open_rows:
+    if _open_matrix_total > 0:
+        renorm_share = r["target_pct"] / _open_matrix_total
+        amt = default_deploy * renorm_share
+        _alloc_amts[r["ticker"]] = amt
+    else:
+        _alloc_amts[r["ticker"]] = 0.0
+
+# Aggregate sub-row allocations into the SGOV parent (display only)
+_sgov_parent_alloc = sum(_alloc_amts.get(t, 0.0) for t in ("Cash Dry Powder", "SpaceX", "Anthropic"))
+_alloc_amts["SGOV"] = _sgov_parent_alloc   # for display in the parent row
+
+# Total: sum unique sleeves only (don't double-count parent)
+_total_allocated = sum(amt for t, amt in _alloc_amts.items() if t != "SGOV")
+_unallocated = max(0.0, default_deploy - _total_allocated)
+
+# Tree characters for sub-rows
+SGOV_SUB_TREE = {"Cash Dry Powder": "├─", "SpaceX": "├─", "Anthropic": "└─"}
+
+alloc_rows_html = ""
+for r in alloc_rows:
+    gap = r["gap_dollar"]
+    gap_sign = "+" if gap > 0 else ""
+    row_type = r.get("row_type", "equity")
+    is_parent = row_type == "sgov_parent"
+    is_sub = row_type == "sgov_sub"
+
+    if gap > 100:
+        gap_cls = "alloc-red"
+        alloc_amt = _alloc_amts.get(r["ticker"], 0.0)
+        alloc_str = f"${alloc_amt:,.0f}" if alloc_amt > 0 else "—"
+        # Shares column
+        if r["ticker"] in ("SpaceX", "Anthropic", "SGOV", "Cash Dry Powder"):
+            shares_str = "—"
+        elif r["live_price"] and r["live_price"] > 0 and alloc_amt > 0:
+            n = int(alloc_amt / r["live_price"])
+            shares_str = str(n) if n > 0 else "<1"
+        else:
+            shares_str = "—"
+    elif gap < -100:
+        gap_cls = "alloc-green"
+        alloc_str = "—"
+        shares_str = "OVER (locked)"
+    else:
+        gap_cls = "alloc-ok"
+        alloc_str = "—"
+        shares_str = "—"
+
+    # Row class + ticker display formatting
+    if is_parent:
+        row_cls = "alloc-sgov-parent"
+        ticker_display = f"<strong>{r['ticker']}</strong><div class='alloc-sleeve'>{r['sleeve']}</div>"
+    elif is_sub:
+        row_cls = "alloc-sgov-sub"
+        tree = SGOV_SUB_TREE.get(r["ticker"], "├─")
+        ticker_display = f"<span class='alloc-tree'>{tree}</span> {r['ticker']}<div class='alloc-sleeve alloc-sub-sleeve'>{r['sleeve']}</div>"
+    else:
+        row_cls = ""
+        ticker_display = f"<strong>{r['ticker']}</strong><div class='alloc-sleeve'>{r['sleeve']}</div>"
+
+    price_str = _fmt_usd(r["live_price"], 2) if r["live_price"] else "—"
+    action_str = r["action"] or "—"
+    notes_str = r["notes"] or ""
+    alloc_rows_html += f"""
+        <tr class="{row_cls}">
+          <td>{ticker_display}</td>
+          <td class="alloc-num">{r['target_pct']*100:.2f}%</td>
+          <td class="alloc-num">{_fmt_usd(r['current_dollar'])}</td>
+          <td class="alloc-num">{_fmt_usd(r['target_dollar'])}</td>
+          <td class="alloc-num {gap_cls}">{gap_sign}{_fmt_usd(gap)}</td>
+          <td class="alloc-num">{price_str}</td>
+          <td class="alloc-num"><strong>{alloc_str}</strong></td>
+          <td class="alloc-num">{shares_str}</td>
+          <td><span class="alloc-act">{action_str}</span><div class="alloc-note">{notes_str}</div></td>
+        </tr>"""
+
+# Totals row — clean, no parenthetical breakdown
+alloc_rows_html += f"""
+        <tr class="alloc-totals">
+          <td colspan="6"><strong>TOTAL DEPLOYED</strong></td>
+          <td class="alloc-num"><strong>${_total_allocated:,.0f}</strong></td>
+          <td class="alloc-num">—</td>
+          <td><span class="alloc-note">{'Unallocated $'+f'{_unallocated:,.0f}' if _unallocated > 10 else 'Fully deployed'}</span></td>
+        </tr>"""
+
+# ── Build holdings tables (Active + Legacy) ──
+def _build_holdings_table(predicate, title):
+    rows_html = ""
+    for r in [hr for hr in holdings_rows if predicate(hr)]:
+        is_cash = r["ticker"] == "CASH"
+        ltd_cls = "pos" if r["pnl_ltd"] >= 0 else "neg"
+        ytd_cls = "pos" if r["ytd_pct"] >= 0 else "neg"
+        ltd_sign = "+" if r["pnl_ltd"] >= 0 else ""
+        ytd_sign = "+" if r["ytd_pct"] >= 0 else ""
+        acc_lbl = ACCOUNT_LABELS.get(r["account"], r["account"])
+        rows_html += f"""
+            <tr class="hold-row{' hold-cash' if is_cash else ''}">
+              <td>{acc_lbl}</td>
+              <td><strong>{r['ticker']}</strong></td>
+              <td class="hold-num">{_fmt_shares(r['shares'])}</td>
+              <td class="hold-num">{_fmt_usd(r['price'], 2) if r['price'] else '—'}</td>
+              <td class="hold-num"><strong>{_fmt_usd(r['value'])}</strong></td>
+              <td class="hold-num {ytd_cls}">{ytd_sign}{r['ytd_pct']:.1f}%</td>
+              <td class="hold-num {ltd_cls}">{ltd_sign}{_fmt_usd(r['pnl_ltd']) if not is_cash else '—'}</td>
+              <td class="hold-num {ltd_cls}">{(ltd_sign + f"{r['pnl_ltd_pct']:.1f}%") if not is_cash else '—'}</td>
+            </tr>"""
+    return rows_html
+
+active_rows_html = _build_holdings_table(lambda r: r["classification"] == "ACTIVE", "ACTIVE")
+legacy_rows_html = _build_holdings_table(lambda r: r["classification"] == "LEGACY", "LEGACY")
+
+# ── Mag6 internal weight footer string ──
+mag6_footer = " / ".join([f"{t} {int(w*100)}%" for t, w in MAG6_INTERNAL.items()])
+
+# ── Zone-allocation chip row for header ──
+z_chip = ZONE_ALLOCATION[current_zone]
+zone_chip_html = f"""
+      <div class="zone-alloc-chip"><span>{z_chip['SPYL']*100:.0f}%</span><small>SPYL Anchor</small></div>
+      <div class="zone-alloc-chip"><span>{z_chip['MAG6']*100:.0f}%</span><small>Mag6 Alpha</small></div>
+      <div class="zone-alloc-chip"><span>{z_chip['SPACEX']*100:.0f}%</span><small>SpaceX</small></div>
+      <div class="zone-alloc-chip"><span>{z_chip['ANTHROPIC']*100:.0f}%</span><small>Anthropic</small></div>
+      <div class="zone-alloc-chip"><span>{z_chip['CASH']*100:.0f}%</span><small>SGOV Cash</small></div>"""
+
+# ─────────────────────────────────────────────────────────────────────────────
+# HTML STRING
+# ─────────────────────────────────────────────────────────────────────────────
 
 html = f"""<!DOCTYPE html>
 <html lang="en">
@@ -1222,7 +1481,7 @@ html = f"""<!DOCTYPE html>
   --bdr:#e2e0db;--bdr2:#ccc9c2;
   --txt:#1a1814;--mut:#7c7970;--dim:#f0efe9;
   --grn:#15803d;--red:#b91c1c;--amb:#b45309;
-  --spy:#16a34a;--mag:#1d4ed8;--tsl:#dc2626;--btc:#eab308;
+  --spyl:#16a34a;--mag6:#1d4ed8;--port:#7c3aed;
   --zone:{zone_color};
 }}
 html,body{{background:var(--bg);color:var(--txt);font-family:'DM Mono',monospace;font-size:13px;min-height:100vh}}
@@ -1241,7 +1500,7 @@ html,body{{background:var(--bg);color:var(--txt);font-family:'DM Mono',monospace
 .section-hd{{font-size:9px;letter-spacing:.18em;text-transform:uppercase;color:var(--mut);margin-bottom:14px;padding-bottom:6px;border-bottom:.5px solid var(--bdr);display:flex;justify-content:space-between;align-items:center}}
 
 /* ── ZONE BANNER ── */
-.zone-banner{{background:{zone_bg};border:1px solid {zone_color}33;border-radius:8px;padding:14px 18px;margin-bottom:20px;display:flex;align-items:center;gap:16px;flex-wrap:wrap}}
+.zone-banner{{background:{zone_bg};border:1px solid {zone_color}33;border-radius:8px;padding:14px 18px;margin-bottom:24px;display:flex;align-items:center;gap:16px;flex-wrap:wrap}}
 .zone-pill{{background:{zone_color};color:#fff;font-family:'Syne',sans-serif;font-size:13px;font-weight:700;padding:5px 14px;border-radius:20px;letter-spacing:.03em;white-space:nowrap}}
 .zone-spread{{font-size:22px;font-family:'Syne',sans-serif;font-weight:700;color:{zone_color}}}
 .zone-desc{{font-size:11px;color:var(--mut)}}
@@ -1250,46 +1509,67 @@ html,body{{background:var(--bg);color:var(--txt);font-family:'DM Mono',monospace
 .zone-alloc-chip span{{display:block;font-size:16px;font-weight:600;color:var(--txt);line-height:1.2}}
 .zone-alloc-chip small{{color:var(--mut)}}
 
-/* ── YIELD CURVE ── */
-.yc-section{{margin-bottom:32px}}
-.yc-tabs{{display:flex;border-bottom:1px solid var(--bdr);margin-bottom:12px}}
-.yc-tab{{font-size:10px;padding:7px 16px;border:none;background:transparent;color:var(--mut);cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px;letter-spacing:.05em}}
-.yc-tab.on{{color:var(--txt);border-bottom-color:var(--zone)}}
-.yc-wrap{{position:relative;width:100%;height:220px}}
-.yc-legend{{display:flex;gap:16px;flex-wrap:wrap;margin-top:8px;font-size:9px;color:var(--mut)}}
-.yc-li{{display:flex;align-items:center;gap:5px}}
-.yc-ln{{width:18px;height:2px;flex-shrink:0}}
-.yc-ld{{width:18px;height:2px;background-image:repeating-linear-gradient(90deg,currentColor 0,currentColor 4px,transparent 4px,transparent 8px)}}
+/* ── MONTHLY ALLOCATION TABLE ── */
+.alloc-section{{margin-bottom:32px}}
+.alloc-input-row{{display:flex;align-items:center;gap:12px;margin-bottom:16px;flex-wrap:wrap}}
+.alloc-input-lbl{{font-size:10px;color:var(--mut);white-space:nowrap}}
+.alloc-input{{font-family:'DM Mono',monospace;font-size:18px;font-weight:500;color:var(--txt);border:1.5px solid var(--zone);border-radius:6px;padding:7px 14px;width:180px;background:var(--surf);outline:none}}
+.alloc-input:focus{{border-color:var(--txt);box-shadow:0 0 0 3px rgba(0,0,0,.06)}}
+.alloc-hint{{font-size:9px;color:var(--mut)}}
+.alloc-cap{{font-size:11px;color:var(--mut);margin-bottom:12px}}
+.alloc-cap strong{{color:var(--txt);font-weight:600}}
+.alloc-table{{width:100%;border-collapse:collapse;font-size:11px;background:var(--surf);border:.5px solid var(--bdr);border-radius:6px;overflow:hidden}}
+.alloc-table th{{font-size:9px;letter-spacing:.1em;text-transform:uppercase;color:var(--mut);padding:8px 10px;text-align:left;border-bottom:1px solid var(--bdr);white-space:nowrap;background:var(--surf2)}}
+.alloc-table td{{padding:10px;border-bottom:.5px solid var(--bdr);vertical-align:middle}}
+.alloc-table tr:last-child td{{border-bottom:none}}
+.alloc-table tr:hover td{{background:var(--dim)}}
+.alloc-num{{text-align:right;font-variant-numeric:tabular-nums}}
+.alloc-sleeve{{font-size:9px;color:var(--mut);margin-top:1px}}
+.alloc-act{{font-size:10px;font-weight:600}}
+.alloc-note{{font-size:9px;color:var(--mut);margin-top:2px;font-style:italic}}
+.alloc-red{{color:var(--red);font-weight:600}}      /* needs action (gap) */
+.alloc-green{{color:var(--grn);font-weight:600}}    /* at-target / done */
+.alloc-ok{{color:var(--mut)}}
+/* Backward compat aliases — older classes redirect to new semantics */
+.alloc-buy{{color:var(--red);font-weight:600}}      /* legacy: buy = action = red */
+.alloc-sell{{color:var(--grn);font-weight:600}}     /* legacy: over/sell = done = green */
+.alloc-totals{{background:var(--surf2);border-top:1.5px solid var(--bdr2);font-weight:600}}
+.alloc-totals td{{padding:11px 10px}}
+/* SGOV parent row — slightly emphasized */
+.alloc-sgov-parent{{background:var(--surf2);border-top:.5px solid var(--bdr2);border-bottom:.5px solid var(--bdr)}}
+.alloc-sgov-parent td{{padding-top:11px;padding-bottom:6px;font-weight:500}}
+/* SGOV sub-rows — indented, smaller, muted */
+.alloc-sgov-sub{{background:#fafaf7}}
+.alloc-sgov-sub td{{padding-top:6px;padding-bottom:6px;font-size:10.5px;color:#7c7970}}
+.alloc-sgov-sub td:first-child{{padding-left:22px}}
+.alloc-sgov-sub .alloc-num{{color:#7c7970}}
+.alloc-tree{{color:#a8a59c;font-family:monospace;margin-right:4px;font-size:10px}}
+.alloc-sub-sleeve{{opacity:.7}}
+/* SGOV block ends before equities — border separator */
+.alloc-sgov-sub:last-of-type{{border-bottom:1px solid var(--bdr2)}}
 
-/* ── ACTION TABLE ── */
-.action-section{{margin-bottom:32px}}
-.cash-input-row{{display:flex;align-items:center;gap:12px;margin-bottom:16px;flex-wrap:wrap}}
-.cash-label{{font-size:10px;color:var(--mut);white-space:nowrap}}
-.cash-input{{font-family:'DM Mono',monospace;font-size:18px;font-weight:500;color:var(--txt);border:1.5px solid var(--zone);border-radius:6px;padding:7px 14px;width:180px;background:var(--surf);outline:none}}
-.cash-input:focus{{border-color:var(--txt);box-shadow:0 0 0 3px rgba(0,0,0,.06)}}
-.cash-hint{{font-size:9px;color:var(--mut)}}
-.action-table{{width:100%;border-collapse:collapse;font-size:11px}}
-.action-table th{{font-size:9px;letter-spacing:.1em;text-transform:uppercase;color:var(--mut);padding:6px 10px;text-align:left;border-bottom:1px solid var(--bdr);white-space:nowrap}}
-.action-table td{{padding:9px 10px;border-bottom:.5px solid var(--bdr);vertical-align:middle}}
-.action-table tr:last-child td{{border-bottom:none}}
-.action-table tr:hover td{{background:var(--dim)}}
-.at-ticker{{font-family:'Syne',sans-serif;font-weight:700;font-size:13px}}
-.at-bucket{{font-size:9px;color:var(--mut);margin-top:1px}}
-.urgency-HIGH{{color:#fff;background:#dc2626;padding:2px 7px;border-radius:3px;font-size:9px;font-weight:600}}
-.urgency-MEDIUM{{color:#92400e;background:#fef3c7;padding:2px 7px;border-radius:3px;font-size:9px}}
-.urgency-LOW{{color:#1e40af;background:#dbeafe;padding:2px 7px;border-radius:3px;font-size:9px}}
-.urgency-SKIP{{color:var(--mut);background:var(--dim);padding:2px 7px;border-radius:3px;font-size:9px}}
-.at-alloc{{font-size:13px;font-weight:600}}
-.at-shares{{font-size:13px;font-weight:500;color:var(--txt)}}
-.at-limit{{font-size:12px;color:var(--mut)}}
-.at-action{{font-size:10px}}
-.dep-green{{color:#15803d;font-weight:600}}
-.dep-amber{{color:#b45309;font-weight:500}}
-.dep-red{{color:#b91c1c;font-weight:500}}
-.dep-neutral{{color:var(--mut)}}
-.residual-row{{background:var(--dim);border-top:1px solid var(--bdr);font-size:11px;padding:8px 10px;display:flex;justify-content:space-between;border-radius:0 0 6px 6px}}
+/* ── HOLDINGS — ACTIVE / LEGACY / TOTAL ── */
+.hold-section{{margin-bottom:32px}}
+.hold-trio{{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:16px}}
+@media(max-width:780px){{.hold-trio{{grid-template-columns:1fr}}}}
+.hold-summary-card{{background:var(--surf);border:.5px solid var(--bdr);border-radius:6px;padding:14px 16px}}
+.hold-summary-card.active{{border-left:3px solid var(--mag6)}}
+.hold-summary-card.legacy{{border-left:3px solid var(--mut)}}
+.hold-summary-card.total{{border-left:3px solid var(--zone)}}
+.hold-card-lbl{{font-size:9px;letter-spacing:.12em;text-transform:uppercase;color:var(--mut);margin-bottom:6px}}
+.hold-card-val{{font-family:'Syne',sans-serif;font-size:22px;font-weight:700;color:var(--txt);margin-bottom:6px}}
+.hold-card-row{{display:flex;justify-content:space-between;font-size:10px;color:var(--mut);padding:3px 0}}
+.hold-card-row strong{{font-family:'DM Mono',monospace;font-weight:500;color:var(--txt)}}
+.hold-subhd{{font-size:9px;letter-spacing:.12em;text-transform:uppercase;color:var(--mut);margin:18px 0 8px;padding-bottom:4px;border-bottom:.5px solid var(--bdr)}}
+.hold-table{{width:100%;border-collapse:collapse;font-size:11px;background:var(--surf);border:.5px solid var(--bdr);border-radius:6px;overflow:hidden}}
+.hold-table th{{font-size:9px;letter-spacing:.1em;text-transform:uppercase;color:var(--mut);padding:7px 10px;text-align:left;border-bottom:1px solid var(--bdr);background:var(--surf2);white-space:nowrap}}
+.hold-table td{{padding:8px 10px;border-bottom:.5px solid var(--bdr);vertical-align:middle}}
+.hold-table tr:last-child td{{border-bottom:none}}
+.hold-num{{text-align:right;font-variant-numeric:tabular-nums}}
+.hold-cash{{background:var(--dim);font-style:italic;opacity:.85}}
+.pos{{color:var(--grn)}} .neg{{color:var(--red)}}
 
-/* ── STOCK CHART ── */
+/* ── PERFORMANCE CHART ── */
 .chart-section{{margin-bottom:32px}}
 .ctrls{{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px}}
 .cl{{font-size:9px;color:var(--mut);letter-spacing:.06em}}
@@ -1299,13 +1579,12 @@ html,body{{background:var(--bg);color:var(--txt);font-family:'DM Mono',monospace
 .tabs{{display:flex;border-bottom:1px solid var(--bdr);margin-bottom:12px}}
 .tab{{font-size:10px;padding:7px 16px;border:none;background:transparent;color:var(--mut);cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px;font-family:'DM Mono',monospace;letter-spacing:.04em}}
 .tab.on{{color:var(--txt);border-bottom-color:var(--txt)}}
-.cards{{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-bottom:12px}}
+.cards{{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-bottom:12px}}
 .card{{background:var(--surf);border-radius:6px;border:.5px solid var(--bdr);border-top:2px solid transparent;padding:11px 13px}}
 .card-lbl{{font-size:9px;color:var(--mut);letter-spacing:.1em;margin-bottom:4px}}
 .card-val{{font-size:20px;font-weight:500;margin-bottom:2px}}
 .card-sub{{font-size:9px;color:var(--mut)}}
 .card-base{{font-size:9px;color:var(--mut);opacity:.5;margin-top:2px}}
-.pos{{color:var(--grn)}} .neg{{color:var(--red)}}
 .legend{{display:flex;gap:14px;flex-wrap:wrap;margin-bottom:8px;font-size:9px;color:var(--mut)}}
 .li{{display:flex;align-items:center;gap:5px}}
 .ln{{width:18px;height:2px;flex-shrink:0}}
@@ -1327,86 +1606,55 @@ html,body{{background:var(--bg);color:var(--txt);font-family:'DM Mono',monospace
 .fv-hold{{background:#fef3c7;color:#92400e}}
 .fv-cau{{background:#fee2e2;color:#991b1b}}
 .fv-dca{{background:#dbeafe;color:#1e40af}}
-.fv-strat{{background:#f3e8ff;color:#6b21a8}}
-.fv-prow{{display:flex;gap:12px;margin-bottom:10px}}
-.fv-pblk{{flex:1}}
-.fv-plbl{{font-size:8px;color:var(--mut);letter-spacing:.1em;text-transform:uppercase;margin-bottom:2px}}
-.fv-pval{{font-size:16px;font-weight:600;color:var(--txt);font-family:'Syne',sans-serif}}
-.fv-pos{{color:var(--grn)}} .fv-neg{{color:var(--red)}}
-.fv-bar{{margin:6px 0}}
-.fv-blbl{{display:flex;justify-content:space-between;font-size:8px;color:var(--mut);margin-bottom:3px}}
-.fv-bg{{height:4px;background:var(--dim);border-radius:2px;overflow:hidden}}
-.fv-fl{{height:100%;border-radius:2px}}
-.fv-mtx{{display:flex;gap:6px;margin-top:8px}}
-.fv-mbox{{flex:1;background:var(--dim);border-radius:4px;padding:5px 8px;text-align:center}}
-.fv-mlbl{{font-size:8px;color:var(--mut);margin-bottom:1px}}
-.fv-mval{{font-size:11px;font-weight:600;color:var(--txt)}}
-.fv-overlay{{margin-top:10px;padding-top:8px;border-top:.5px solid var(--bdr)}}
-.fv-orow{{display:flex;justify-content:space-between;align-items:center;padding:3px 0;font-size:10px}}
-.fv-olbl{{color:var(--mut);flex-shrink:0;margin-right:8px}}
-.fv-oval{{text-align:right}}
-.fv-disc{{font-size:8px;color:var(--mut);margin-top:16px;padding-top:8px;border-top:.5px solid var(--bdr);line-height:1.6}}
+.fv-price-row{{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:8px}}
+.fv-price-block{{padding:8px 0}}
+.fv-price-lbl{{font-size:8px;letter-spacing:.1em;color:var(--mut);margin-bottom:3px}}
+.fv-price-val{{font-family:'Syne',sans-serif;font-size:16px;font-weight:700;color:var(--txt)}}
+.fv-range{{display:flex;justify-content:space-between;font-size:9px;color:var(--mut);padding:6px 0;border-top:.5px solid var(--bdr);border-bottom:.5px solid var(--bdr);margin-bottom:10px}}
+.fv-met-grid{{display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:10px}}
+.fv-met{{background:var(--surf2);border-radius:4px;padding:6px 8px}}
+.fv-met-lbl{{font-size:8px;color:var(--mut);letter-spacing:.05em;margin-bottom:2px}}
+.fv-met-val{{font-size:13px;font-weight:600;color:var(--txt)}}
+.fv-action{{background:var(--surf2);border-radius:4px;padding:8px 10px;margin-bottom:8px}}
+.fv-action-lbl{{font-size:8px;color:var(--mut);letter-spacing:.1em;margin-bottom:2px}}
+.fv-action-val{{font-size:13px;font-weight:600}}
+.fv-meta{{font-size:9px;color:var(--mut);line-height:1.6}}
+.fv-meta div{{display:flex;justify-content:space-between;padding:2px 0}}
+.fv-meta strong{{color:var(--txt);font-family:'DM Mono',monospace;font-weight:500}}
+.fv-dip{{background:var(--surf2);border:.5px solid var(--bdr);border-radius:4px;padding:8px 10px;margin-top:8px;font-size:10px}}
+.fv-dip-hd{{font-size:8px;letter-spacing:.1em;color:var(--mut);margin-bottom:4px}}
+.fv-dip-val{{font-family:'Syne',sans-serif;font-size:16px;font-weight:700;margin-bottom:2px}}
+.fv-dip-msg{{font-size:10px;color:var(--mut);margin-bottom:5px}}
+.fv-dip-scale{{display:flex;justify-content:space-between;font-size:8px;color:var(--mut)}}
+.fv-disc{{font-size:9px;color:var(--mut);margin-top:12px;line-height:1.6;opacity:.8}}
+.dep-green{{color:#15803d}}
+.dep-amber{{color:#b45309}}
+.dep-red{{color:#b91c1c}}
+.dep-neutral{{color:var(--mut)}}
 
-/* SPYL dip trigger */
-.fv-dip{{margin-top:10px;padding:8px 10px;background:var(--dim);border-radius:5px}}
-.fv-dip-title{{font-size:8px;letter-spacing:.12em;text-transform:uppercase;color:var(--mut);margin-bottom:5px}}
-.fv-dip-vals{{display:flex;justify-content:space-between;font-size:10px;margin-bottom:5px}}
-.fv-dip-bar{{height:5px;background:#e5e7eb;border-radius:3px;position:relative;overflow:visible;margin-bottom:2px}}
-.fv-dip-fill{{height:100%;border-radius:3px;transition:width .3s}}
-.fv-dip-mark{{position:absolute;top:-3px;width:1.5px;height:11px;background:#94a3b8}}
-.fv-dip-labels{{display:flex;justify-content:space-between;font-size:8px;color:var(--mut)}}
-
-/* BTC note */
-.fv-btcnote{{margin-top:10px;padding:8px 10px;background:var(--dim);border-radius:5px}}
-.fv-btcrow{{display:flex;justify-content:space-between;font-size:10px;padding:2px 0}}
-
-/* ── PORTFOLIO SNAPSHOT (HERO) ── */
-.snap-section{{margin-bottom:32px}}
-.snap-hero{{background:linear-gradient(135deg,var(--surf) 0%,var(--surf2) 100%);border:1px solid var(--bdr);border-radius:10px;padding:20px 24px;margin-bottom:14px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:16px}}
-.snap-total-block{{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap}}
-.snap-total-lbl{{font-size:9px;letter-spacing:.18em;text-transform:uppercase;color:var(--mut)}}
-.snap-total-val{{font-family:'Syne',sans-serif;font-size:36px;font-weight:800;color:var(--txt);letter-spacing:-.5px;line-height:1}}
-.snap-pnl{{font-family:'Syne',sans-serif;font-size:13px;font-weight:700;padding:4px 10px;border-radius:6px}}
-.snap-pnl.pos{{background:#dcfce7;color:#15803d}}
-.snap-pnl.neg{{background:#fee2e2;color:#b91c1c}}
-.snap-meta{{display:flex;gap:18px;font-size:10px;color:var(--mut);flex-wrap:wrap}}
-.snap-meta strong{{color:var(--txt);font-family:'Syne',sans-serif;font-size:14px;display:block;margin-top:2px}}
-.acc-pill-row{{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}}
-.acc-pill{{background:var(--surf);border:.5px solid var(--bdr);border-radius:6px;padding:8px 14px}}
-.acc-name{{font-size:9px;color:var(--mut);letter-spacing:.06em;text-transform:uppercase}}
-.acc-val{{font-family:'Syne',sans-serif;font-size:14px;font-weight:700;color:var(--txt);margin-top:2px}}
-
-/* ── HOLDINGS TABLE ── */
-.hold-section{{margin-bottom:32px}}
-.hold-table{{width:100%;border-collapse:collapse;font-size:11px;background:var(--surf);border:.5px solid var(--bdr);border-radius:6px;overflow:hidden}}
-.hold-table th{{font-size:9px;letter-spacing:.1em;text-transform:uppercase;color:var(--mut);padding:8px 10px;text-align:left;border-bottom:1px solid var(--bdr);background:var(--surf2);white-space:nowrap}}
-.hold-table th.hold-num,.hold-table td.hold-num{{text-align:right}}
-.hold-table td{{padding:8px 10px;border-bottom:.5px solid var(--bdr);vertical-align:middle}}
-.hold-row:hover td{{background:var(--dim)}}
-.hold-row.hold-cash{{background:#fffbeb}}
-.hold-row.hold-cash td{{color:var(--mut);font-style:italic}}
-.hold-acc{{font-size:10px;color:var(--mut)}}
-.hold-tk{{font-family:'Syne',sans-serif;font-weight:700;font-size:12px}}
-
-/* ── DEPLOYMENT GAPS ── */
-.gap-section{{margin-bottom:32px}}
-.gap-table{{width:100%;border-collapse:collapse;font-size:11px;background:var(--surf);border:.5px solid var(--bdr);border-radius:6px;overflow:hidden}}
-.gap-table th{{font-size:9px;letter-spacing:.1em;text-transform:uppercase;color:var(--mut);padding:8px 10px;text-align:left;border-bottom:1px solid var(--bdr);background:var(--surf2);white-space:nowrap}}
-.gap-table th.hold-num,.gap-table td.hold-num{{text-align:right}}
-.gap-table td{{padding:8px 10px;border-bottom:.5px solid var(--bdr);vertical-align:middle}}
-.gap-tk{{font-family:'Syne',sans-serif;font-weight:700;font-size:12px}}
-.gap-bar{{height:5px;background:#e5e7eb;border-radius:3px;overflow:hidden;width:140px}}
-.gap-fill{{height:100%;border-radius:3px;transition:width .3s}}
-.gap-pct{{font-size:9px;color:var(--mut);margin-top:3px;width:140px}}
+/* ── YIELD CURVE ── */
+.yc-section{{margin-bottom:32px}}
+.yc-tabs{{display:flex;border-bottom:1px solid var(--bdr);margin-bottom:12px}}
+.yc-tab{{font-size:10px;padding:7px 16px;border:none;background:transparent;color:var(--mut);cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px;letter-spacing:.05em}}
+.yc-tab.on{{color:var(--txt);border-bottom-color:var(--zone)}}
+.yc-wrap{{position:relative;width:100%;height:220px}}
+.yc-legend{{display:flex;gap:16px;flex-wrap:wrap;margin-top:8px;font-size:9px;color:var(--mut)}}
+.yc-li{{display:flex;align-items:center;gap:5px}}
+.yc-ln{{width:18px;height:2px;flex-shrink:0}}
+.yc-ld{{width:18px;height:2px;background-image:repeating-linear-gradient(90deg,currentColor 0,currentColor 4px,transparent 4px,transparent 8px)}}
 
 /* ── FOOTER ── */
 hr{{border:none;border-top:.5px solid var(--bdr);margin:24px 0 12px}}
 .footer{{font-size:9px;color:var(--mut);line-height:2;text-align:center}}
 
 @media(max-width:700px){{
-  .cards{{grid-template-columns:repeat(2,1fr)}}
+  .cards{{grid-template-columns:1fr}}
   .tab,.yc-tab{{padding:6px 10px;font-size:9px}}
-  .action-table th:nth-child(n+5),.action-table td:nth-child(n+5){{display:none}}
+  /* On mobile, hide Current $, Target $, Live Price, Shares — keep Ticker, Target %, Gap $, Allocation $, Zone Action */
+  .alloc-table th:nth-child(3),.alloc-table td:nth-child(3),
+  .alloc-table th:nth-child(4),.alloc-table td:nth-child(4),
+  .alloc-table th:nth-child(6),.alloc-table td:nth-child(6),
+  .alloc-table th:nth-child(8),.alloc-table td:nth-child(8){{display:none}}
 }}
 </style>
 </head>
@@ -1416,8 +1664,8 @@ hr{{border:none;border-top:.5px solid var(--bdr);margin:24px 0 12px}}
   <!-- HEADER -->
   <div class="hdr">
     <div class="hdr-left">
-      <h1>Investment Dashboard</h1>
-      <div class="hdr-sub">AI Alpha Engine · Passive Anchor · Asymmetric Bets</div>
+      <h1>Investment Dashboard <em>v{SCRIPT_VERSION}</em></h1>
+      <div class="hdr-sub">SPYL Anchor · Mag6 Alpha · Strategic Earmarks · Active vs Legacy</div>
     </div>
     <div style="text-align:right">
       <div style="font-family:'Syne',sans-serif;font-size:11px;font-weight:700;color:var(--zone)">{zone_label}</div>
@@ -1426,7 +1674,7 @@ hr{{border:none;border-top:.5px solid var(--bdr);margin:24px 0 12px}}
   </div>
   <div class="src">
     <span class="src-dot"></span>
-    <span>Refreshed: {fetched_at} · Next: {next_refresh} · Yahoo Finance via yfinance</span>
+    <span>Refreshed: {fetched_at} · Next: {next_refresh} · Twelve Data + FRED</span>
   </div>
 
   <!-- ZONE BANNER -->
@@ -1440,93 +1688,170 @@ hr{{border:none;border-top:.5px solid var(--bdr);margin:24px 0 12px}}
       <div style="font-size:9px;color:var(--mut)">OU mean reversion target</div>
       <div style="font-size:16px;font-weight:600;color:var(--mut)">+{OU_MU:.1f}% long-run</div>
     </div>
-    <div class="zone-alloc-row">
-      <div class="zone-alloc-chip"><span>{zone_deploy['B1']}</span><small>Bucket 1</small></div>
-      <div class="zone-alloc-chip"><span>{zone_deploy['SPYL']}</span><small>SPYL</small></div>
-      <div class="zone-alloc-chip"><span>{zone_deploy['B3']}</span><small>Bucket 3</small></div>
-      <div class="zone-alloc-chip"><span>{zone_deploy['Dry']}</span><small>Dry Powder</small></div>
-      <div class="zone-alloc-chip"><span>{zone_deploy['PHP']}</span><small>PHP Cash</small></div>
+    <div class="zone-alloc-row">{zone_chip_html}
     </div>
   </div>
 
-  <!-- PORTFOLIO SNAPSHOT -->
-  <div class="snap-section">
+
+  <!-- ─────────────────────────────────────────────────────────────── -->
+  <!-- 1. MONTHLY ALLOCATION TABLE (replaces Monday Action Table)       -->
+  <!-- ─────────────────────────────────────────────────────────────── -->
+  <div class="alloc-section">
     <div class="section-hd">
-      <span>PORTFOLIO SNAPSHOT</span>
-      <span style="font-size:9px">Live valuation · {len(holdings_rows)} positions across {len(account_totals)} accounts</span>
+      <span>1 · MONTHLY ALLOCATION TABLE</span>
+      <span style="font-size:9px;color:var(--zone)">Zone {current_zone} · Deployable: ${deployable_total:,.0f} (Total ${total_portfolio:,.0f} − BTC ${btc_value:,.0f} legacy)</span>
     </div>
-    <div class="snap-hero">
-      <div class="snap-total-block">
-        <div>
-          <div class="snap-total-lbl">Total Portfolio Value</div>
-          <div class="snap-total-val">${total_value:,.0f}</div>
-        </div>
-        <div class="snap-pnl {'pos' if total_pnl >= 0 else 'neg'}">
-          {'+' if total_pnl >= 0 else ''}${total_pnl:,.0f} ({'+' if total_pnl >= 0 else ''}{total_pnl_pct:.1f}%)
-        </div>
-      </div>
-      <div class="snap-meta">
-        <div>Cost basis<strong>${total_cost:,.0f}</strong></div>
-        <div>Cash on hand<strong>${total_cash:,.0f}</strong></div>
-        <div>Invested<strong>${total_value - total_cash:,.0f}</strong></div>
-      </div>
+    <div class="alloc-input-row">
+      <span class="alloc-input-lbl">Deployment input (USD):</span>
+      <input class="alloc-input" type="number" id="deployInput" value="{int(default_deploy)}" min="0" step="100" oninput="renderAllocTable()"/>
+      <span class="alloc-hint">Default = $12,820 monthly + ${int(plain_cash_ibkr):,} plain IBKR cash → matrix-weight distribution</span>
     </div>
-    <div class="acc-pill-row">{account_subtotal_html}
+    <div class="alloc-cap">
+      <strong>Strict zone matrix</strong> at whole-portfolio level (Active + Legacy combined, BTC excluded as legacy hold).
+      Allocation distributes by matrix weight, renormalized to under-target ("open") sleeves. Full deployment input is always placed — some sleeves may temporarily exceed target by a small margin (resolves on next allocation cycle).
+      <strong>RED gap</strong> = action needed (under target). <strong>GREEN gap</strong> = at-target or over (Citi-locked positions, structural).
     </div>
+    <table class="alloc-table">
+      <thead>
+        <tr>
+          <th>Ticker / Sleeve</th>
+          <th class="alloc-num">Target %</th>
+          <th class="alloc-num">Current $</th>
+          <th class="alloc-num">Target $</th>
+          <th class="alloc-num">Gap $</th>
+          <th class="alloc-num">Live Price</th>
+          <th class="alloc-num">Allocation $</th>
+          <th class="alloc-num">Shares</th>
+          <th>Zone Action</th>
+        </tr>
+      </thead>
+      <tbody id="allocBody">{alloc_rows_html}
+      </tbody>
+    </table>
   </div>
 
-  <!-- HOLDINGS DETAIL -->
+  <!-- ─────────────────────────────────────────────────────────────── -->
+  <!-- 2. HOLDINGS SNAPSHOT — Active / Legacy / Total                   -->
+  <!-- ─────────────────────────────────────────────────────────────── -->
   <div class="hold-section">
     <div class="section-hd">
-      <span>HOLDINGS SNAPSHOT</span>
-      <span style="font-size:9px">Per-position cost · current value · unrealized P&amp;L</span>
+      <span>2 · HOLDINGS SNAPSHOT</span>
+      <span style="font-size:9px">Active · Legacy · Total · YTD & life-to-date P&amp;L</span>
     </div>
+
+    <!-- Summary trio -->
+    <div class="hold-trio">
+      <div class="hold-summary-card active">
+        <div class="hold-card-lbl">Active Holdings (IBKR)</div>
+        <div class="hold-card-val">${active_agg['value']:,.0f}</div>
+        <div class="hold-card-row"><span>YTD</span><strong class="{('pos' if active_agg['ytd_pct']>=0 else 'neg')}">{('+' if active_agg['ytd_pct']>=0 else '')}{active_agg['ytd_pct']:.2f}%</strong></div>
+        <div class="hold-card-row"><span>Life-to-date G/L</span><strong class="{('pos' if active_agg['pnl_ltd']>=0 else 'neg')}">{('+' if active_agg['pnl_ltd']>=0 else '')}${active_agg['pnl_ltd']:,.0f} ({active_agg['pnl_ltd_pct']:+.1f}%)</strong></div>
+        <div class="hold-card-row"><span>Positions</span><strong>{active_agg['n_positions']}</strong></div>
+      </div>
+      <div class="hold-summary-card legacy">
+        <div class="hold-card-lbl">Legacy Holdings (Citi + BTC)</div>
+        <div class="hold-card-val">${legacy_agg['value']:,.0f}</div>
+        <div class="hold-card-row"><span>YTD</span><strong class="{('pos' if legacy_agg['ytd_pct']>=0 else 'neg')}">{('+' if legacy_agg['ytd_pct']>=0 else '')}{legacy_agg['ytd_pct']:.2f}%</strong></div>
+        <div class="hold-card-row"><span>Life-to-date G/L</span><strong class="{('pos' if legacy_agg['pnl_ltd']>=0 else 'neg')}">{('+' if legacy_agg['pnl_ltd']>=0 else '')}${legacy_agg['pnl_ltd']:,.0f} ({legacy_agg['pnl_ltd_pct']:+.1f}%)</strong></div>
+        <div class="hold-card-row"><span>Positions</span><strong>{legacy_agg['n_positions']}</strong></div>
+      </div>
+      <div class="hold-summary-card total">
+        <div class="hold-card-lbl">Total Portfolio</div>
+        <div class="hold-card-val">${total_agg['value']:,.0f}</div>
+        <div class="hold-card-row"><span>YTD</span><strong class="{('pos' if total_agg['ytd_pct']>=0 else 'neg')}">{('+' if total_agg['ytd_pct']>=0 else '')}{total_agg['ytd_pct']:.2f}%</strong></div>
+        <div class="hold-card-row"><span>Life-to-date G/L</span><strong class="{('pos' if total_agg['pnl_ltd']>=0 else 'neg')}">{('+' if total_agg['pnl_ltd']>=0 else '')}${total_agg['pnl_ltd']:,.0f} ({total_agg['pnl_ltd_pct']:+.1f}%)</strong></div>
+        <div class="hold-card-row"><span>Active mix</span><strong>{(active_agg['value']/total_agg['value']*100):.0f}% / {(legacy_agg['value']/total_agg['value']*100):.0f}%</strong></div>
+      </div>
+    </div>
+
+    <!-- Active detail table -->
+    <div class="hold-subhd">Active Holdings — IBKR (drives Zone Matrix)</div>
     <table class="hold-table">
       <thead>
         <tr>
           <th>Account</th>
           <th>Ticker</th>
           <th class="hold-num">Shares</th>
-          <th class="hold-num">Avg Cost</th>
           <th class="hold-num">Price</th>
-          <th class="hold-num">Cost Basis</th>
           <th class="hold-num">Value</th>
-          <th class="hold-num">P&amp;L</th>
-          <th class="hold-num">P&amp;L %</th>
+          <th class="hold-num">YTD %</th>
+          <th class="hold-num">LTD P&amp;L</th>
+          <th class="hold-num">LTD %</th>
         </tr>
       </thead>
-      <tbody>{snapshot_rows_html}
+      <tbody>{active_rows_html}
       </tbody>
     </table>
-  </div>
 
-  <!-- DEPLOYMENT GAPS -->
-  <div class="gap-section">
-    <div class="section-hd">
-      <span>DEPLOYMENT GAPS</span>
-      <span style="font-size:9px">Current allocation vs target weights · gap = $ to deploy</span>
-    </div>
-    <table class="gap-table">
+    <!-- Legacy detail table -->
+    <div class="hold-subhd">Legacy Holdings — Citi (frozen) + BTC (never add)</div>
+    <table class="hold-table">
       <thead>
         <tr>
+          <th>Account</th>
           <th>Ticker</th>
-          <th class="hold-num">Current Value</th>
-          <th class="hold-num">Current Wt</th>
-          <th class="hold-num">Target Wt</th>
-          <th class="hold-num">Target $</th>
-          <th class="hold-num">Gap to Target</th>
-          <th>Progress</th>
+          <th class="hold-num">Shares</th>
+          <th class="hold-num">Price</th>
+          <th class="hold-num">Value</th>
+          <th class="hold-num">YTD %</th>
+          <th class="hold-num">LTD P&amp;L</th>
+          <th class="hold-num">LTD %</th>
         </tr>
       </thead>
-      <tbody>{gaps_rows_html}
+      <tbody>{legacy_rows_html}
       </tbody>
     </table>
   </div>
 
-  <!-- YIELD CURVE CHART -->
+  <!-- ─────────────────────────────────────────────────────────────── -->
+  <!-- 3. PORTFOLIO PERFORMANCE — SPYL vs Mag6 vs Total Portfolio       -->
+  <!-- ─────────────────────────────────────────────────────────────── -->
+  <div class="chart-section">
+    <div class="section-hd"><span>3 · PORTFOLIO PERFORMANCE</span><span style="font-size:9px">SPYL anchor vs Mag6 alpha vs Total Portfolio (index = 100 at base)</span></div>
+    <div class="ctrls">
+      <span class="cl">Scale</span>
+      <button class="tog on" id="bl" onclick="setScale('linear')">Linear</button>
+      <button class="tog"    id="bg" onclick="setScale('log')">Log</button>
+    </div>
+    <div class="tabs">
+      <button class="tab on" onclick="setTab('7D')">7D / 7D</button>
+      <button class="tab"    onclick="setTab('30D')">30D / 30D</button>
+      <button class="tab"    onclick="setTab('6M')">6M / 6M</button>
+      <button class="tab"    onclick="setTab('YTD')">YTD</button>
+      <button class="tab"    onclick="setTab('1Y')">1Y / 1Y</button>
+      <button class="tab"    onclick="setTab('5Y')">5Y / 5Y</button>
+    </div>
+    <div class="cards" id="cards"></div>
+    <div class="legend">
+      <span class="li"><span class="ln" style="background:var(--spyl)"></span>SPYL · S&amp;P Anchor</span>
+      <span class="li"><span class="ln" style="background:var(--mag6)"></span>Mag6 · Alpha (conviction-weighted)</span>
+      <span class="li"><span class="ln" style="background:var(--port)"></span>My Portfolio · Active + Legacy</span>
+      <span class="li"><span class="ld" style="color:#888"></span>Projection</span>
+    </div>
+    <div class="note" id="note"></div>
+    <div class="chart-wrap"><canvas id="chart" role="img" aria-label="Portfolio performance chart"></canvas></div>
+    <div class="outperf" id="outperf"></div>
+  </div>
+
+  <!-- ─────────────────────────────────────────────────────────────── -->
+  <!-- 4. FAIR VALUE ASSESSMENT CARDS                                    -->
+  <!-- ─────────────────────────────────────────────────────────────── -->
+  <div class="fv-section">
+    <div class="section-hd">
+      <span>4 · FAIR VALUE ASSESSMENT</span>
+      <span style="font-size:9px">Twelve Data live · Analyst consensus · Zone {current_zone} actions</span>
+    </div>
+    <div class="fv-grid">{fv_cards_html}
+    </div>
+    <div class="fv-disc">Twelve Data live · Analyst consensus from stockanalysis.com / tipranks.com · SPYL target = Wall St 2026 S&amp;P consensus implied · BTC target = Stock-to-Flow model range · PEG = Fwd P/E ÷ Revenue growth · Zone actions per strategy.md · Not investment advice</div>
+  </div>
+
+  <!-- ─────────────────────────────────────────────────────────────── -->
+  <!-- 5. MACRO OVERLAY — YIELD CURVE                                    -->
+  <!-- ─────────────────────────────────────────────────────────────── -->
   <div class="yc-section">
     <div class="section-hd">
-      <span>MACRO OVERLAY — YIELD CURVE</span>
+      <span>5 · MACRO OVERLAY — YIELD CURVE</span>
       <span style="font-size:9px">Zone boundaries: 0% · 0.5% · 1.21% · 2.0%</span>
     </div>
     <div class="yc-tabs">
@@ -1545,107 +1870,29 @@ hr{{border:none;border-top:.5px solid var(--bdr);margin:24px 0 12px}}
     </div>
   </div>
 
-  <!-- MONDAY ACTION TABLE -->
-  <div class="action-section">
-    <div class="section-hd">
-      <span>MONDAY ACTION TABLE</span>
-      <span style="font-size:9px;color:var(--zone)">Zone {current_zone} · US market opens 9:30PM Manila</span>
-    </div>
-    <div class="cash-input-row">
-      <span class="cash-label">Weekly deployment (USD):</span>
-      <input class="cash-input" type="number" id="cashInput" value="50000" min="0" step="1000" oninput="renderTable()"/>
-      <span class="cash-hint">Edit to match IBKR settled cash → table updates instantly</span>
-    </div>
-    <table class="action-table" id="actionTable">
-      <thead>
-        <tr>
-          <th>Ticker</th>
-          <th>Bucket</th>
-          <th>Zone Action</th>
-          <th>Urgency</th>
-          <th>Current Price</th>
-          <th>Allocation</th>
-          <th>Shares to Buy</th>
-          <th>Limit Price</th>
-        </tr>
-      </thead>
-      <tbody id="actionBody"></tbody>
-    </table>
-    <div class="residual-row" id="residualRow">
-      <span>Residual cash (dry powder)</span>
-      <span id="residualAmt">—</span>
-    </div>
-  </div>
-
-  <!-- STOCK PERFORMANCE CHART -->
-  <div class="chart-section">
-    <div class="section-hd"><span>PORTFOLIO PERFORMANCE</span></div>
-    <div class="ctrls">
-      <span class="cl">Scale</span>
-      <button class="tog on" id="bl" onclick="setScale('linear')">Linear</button>
-      <button class="tog"    id="bg" onclick="setScale('log')">Log</button>
-      <div class="vsep"></div>
-      <span class="cl">Vol bands</span>
-      <button class="tog on" id="bbon"  onclick="setBands(true)">Show</button>
-      <button class="tog"    id="bboff" onclick="setBands(false)">Hide</button>
-    </div>
-    <div class="tabs">
-      <button class="tab on" onclick="setTab('7D')">7D / 7D</button>
-      <button class="tab"    onclick="setTab('30D')">30D / 30D</button>
-      <button class="tab"    onclick="setTab('6M')">6M / 6M</button>
-      <button class="tab"    onclick="setTab('YTD')">YTD</button>
-      <button class="tab"    onclick="setTab('1Y')">1Y / 1Y</button>
-      <button class="tab"    onclick="setTab('5Y')">5Y / 5Y</button>
-    </div>
-    <div class="cards" id="cards"></div>
-    <div class="legend">
-      <span class="li"><span class="ln" style="background:var(--spy)"></span>SPY · Beta</span>
-      <span class="li"><span class="ln" style="background:var(--mag)"></span>Mag7 · Alpha</span>
-      <span class="li"><span class="ln" style="background:var(--tsl)"></span>Tesla</span>
-      <span class="li"><span class="ln" style="background:var(--btc)"></span>Bitcoin</span>
-      <span class="li"><span class="ld" style="color:#888"></span>Projection</span>
-      <span class="li" id="bandLeg"><span style="display:inline-block;width:14px;height:6px;background:rgba(150,150,150,.15);border-radius:1px"></span>90% band</span>
-    </div>
-    <div class="note" id="note"></div>
-    <div class="chart-wrap"><canvas id="chart" role="img" aria-label="Multi-horizon performance chart"></canvas></div>
-    <div class="outperf" id="outperf"></div>
-  </div>
-
-  <!-- FAIR VALUE CARDS -->
-  <div class="fv-section">
-    <div class="section-hd">
-      <span>FAIR VALUE ASSESSMENT</span>
-      <span style="font-size:9px">Live yfinance · Analyst consensus · Zone {current_zone} actions shown</span>
-    </div>
-    <div class="fv-grid">{fv_cards_html}
-    </div>
-    <div class="fv-disc">Live yfinance data · Analyst consensus from Yahoo Finance · SPYL target = Wall St 2026 S&P consensus implied · BTC target = Stock-to-Flow model range · PEG = Fwd P/E ÷ Revenue growth · Zone actions update with yield curve · Not investment advice</div>
-  </div>
-
   <hr/>
   <div class="footer">
-    Investment Dashboard · yfinance data · MAG7: MSFT 25% / NVDA 25% / GOOGL 20% / META 15% / AMZN 10% / AAPL 5%<br>
-    Yield curve: OU mean reversion μ={OU_MU}% · Stock projections: CAGR (5Y) · Analyst target (≤1Y) · GBM (≤6M) · Not financial advice<br>
+    Investment Dashboard · Twelve Data + FRED · Mag6: {mag6_footer}<br>
+    Yield curve: OU mean reversion μ={OU_MU}% · Per strategy.md v3.0.0 · Not financial advice<br>
     <span style="opacity:.6">v{SCRIPT_VERSION} · {SCRIPT_DATE} · Generated {fetched_at}</span>
   </div>
 </div>
 
 <script>
 const DATA = {payload};
-const COLORS = {{SPY:'#16a34a',MAG7:'#1d4ed8',TSLA:'#dc2626',BTC:'#eab308'}};
-const FWD    = {{SPY:8,MAG7:11,TSLA:15,BTC:20}};
-const LONG_H = new Set(['5Y']);
-const LABELS = {{SPY:'SPY · BETA',MAG7:'MAG7 · ALPHA',TSLA:'TESLA · BET',BTC:'BITCOIN · BET'}};
-const NAMES  = {{SPY:'SPY (Beta)',MAG7:'Mag7 Alpha',TSLA:'Tesla',BTC:'Bitcoin'}};
+const COLORS = {{SPYL:'#16a34a',MAG6:'#1d4ed8',PORTFOLIO:'#7c3aed'}};
+const FWD    = {{SPYL:9,MAG6:12,PORTFOLIO:10.5}};
+const LONG_H = new Set(['5Y','1Y','YTD']);
+const LABELS = {{SPYL:'SPYL · ANCHOR',MAG6:'MAG6 · ALPHA',PORTFOLIO:'MY PORTFOLIO'}};
+const NAMES  = {{SPYL:'SPYL Anchor',MAG6:'Mag6 Alpha',PORTFOLIO:'My Portfolio'}};
 const ZONE_COLOR = '{zone_color}';
 const ZONE_BOUNDARIES = {json.dumps(ZONE_BOUNDARIES)};
-const ZONE_COLORS = ['#dc2626','#ea580c','#d97706','#16a34a','#15803d'];
-const ZONE_BG     = ['rgba(220,38,38,.08)','rgba(234,88,12,.06)','rgba(217,119,6,.04)','rgba(22,163,74,.06)','rgba(21,128,61,.08)'];
+const ACTIVE_CAPITAL = {active_capital};
 
-let curTab='7D', curYCTab='5Y', useLog=false, showBands=true;
+let curTab='7D', curYCTab='5Y', useLog=false;
 let chartInst=null, ycInst=null;
 
-// ── YIELD CURVE CHART ─────────────────────────────────────────────────────────
+// ── YIELD CURVE CHART ───────────────────────────────────────────────────────
 function setYCTab(h){{
   curYCTab=h;
   document.querySelectorAll('.yc-tab').forEach(b=>b.classList.toggle('on',b.textContent.trim()===h+' / '+h||b.textContent.trim()===h));
@@ -1668,12 +1915,10 @@ function renderYC(){{
     c.ctx.restore();
   }}}};
 
-  // Zone band background plugin
   const zoneBandPl = {{id:'zb',beforeDraw(c){{
     const xs=c.scales.x, ys=c.scales.y;if(!xs||!ys)return;
     const ctx=c.ctx, ca=c.chartArea;
     ctx.save();
-    // Zone bands (horizontal)
     const bands = [
       {{lo:-5,  hi:0,    bg:'rgba(220,38,38,.10)'}},
       {{lo:0,   hi:0.5,  bg:'rgba(234,88,12,.07)'}},
@@ -1688,7 +1933,6 @@ function renderYC(){{
       ctx.fillStyle=b.bg;
       ctx.fillRect(ca.left,Math.min(y1,y2),ca.right-ca.left,Math.abs(y2-y1));
     }});
-    // Zero line
     const y0=ys.getPixelForValue(0);
     if(y0>=ca.top&&y0<=ca.bottom){{
       ctx.strokeStyle='rgba(220,38,38,.5)';ctx.lineWidth=1;ctx.setLineDash([3,3]);
@@ -1698,31 +1942,27 @@ function renderYC(){{
   }}}};
 
   const datasets=[];
-  // Historical
   datasets.push({{
     label:'Spread',
     data: yd.hist.map(([dt,v])=>{{return{{x:new Date(dt+'T12:00:00'),y:v}};}}),
     borderColor:ZONE_COLOR,backgroundColor:'transparent',borderWidth:2,pointRadius:0,tension:.15,order:2
   }});
-  // OU projection (center)
   if(yd.proj&&yd.proj.length){{
     const lastH=yd.hist[yd.hist.length-1];
     const stitch=[{{x:new Date(lastH[0]+'T12:00:00'),y:lastH[1]}}];
     datasets.push({{
       label:'OU Projection',
-      data:[...stitch,...yd.proj.map(([dt,v])=>{{return{{x:new Date(dt+'T12:00:00'),y:v}};}})] ,
+      data:[...stitch,...yd.proj.map(([dt,v])=>{{return{{x:new Date(dt+'T12:00:00'),y:v}};}})],
       borderColor:ZONE_COLOR,backgroundColor:'transparent',borderWidth:1.5,pointRadius:0,tension:.2,borderDash:[6,4],order:1
     }});
-    // Confidence band
     if(yd.upper&&yd.lower){{
-      const stU=[{{x:new Date(lastH[0]+'T12:00:00'),y:lastH[1]}},...yd.upper.map(([dt,v])=>{{return{{x:new Date(dt+'T12:00:00'),y:v}};}})] ;
-      const stL=[{{x:new Date(lastH[0]+'T12:00:00'),y:lastH[1]}},...yd.lower.map(([dt,v])=>{{return{{x:new Date(dt+'T12:00:00'),y:v}};}})] ;
+      const stU=[{{x:new Date(lastH[0]+'T12:00:00'),y:lastH[1]}},...yd.upper.map(([dt,v])=>{{return{{x:new Date(dt+'T12:00:00'),y:v}};}})];
+      const stL=[{{x:new Date(lastH[0]+'T12:00:00'),y:lastH[1]}},...yd.lower.map(([dt,v])=>{{return{{x:new Date(dt+'T12:00:00'),y:v}};}})];
       datasets.push({{label:'_u',data:stU,borderColor:'transparent',backgroundColor:'rgba(100,100,100,.08)',fill:'+1',borderWidth:0,pointRadius:0,tension:.2,order:3}});
       datasets.push({{label:'_l',data:stL,borderColor:'transparent',backgroundColor:'rgba(100,100,100,.08)',fill:false,borderWidth:0,pointRadius:0,tension:.2,order:3}});
     }}
   }}
 
-  // Long-run mean reference line (static)
   const allDates=[...yd.hist.map(([dt])=>dt), ...(yd.proj||[]).map(([dt])=>dt)];
   if(allDates.length>1){{
     datasets.push({{
@@ -1758,72 +1998,109 @@ function renderYC(){{
   }});
 }}
 
-// ── MONDAY ACTION TABLE ───────────────────────────────────────────────────────
-const ACTION_ROWS = {action_rows_json};
-const ZONE_B1_FRAC = {{"1":0.25,"2":0.40,"3":0.60,"4":0.65,"5":0.70}};
-const CUR_ZONE = "{current_zone}";
-const B1_FRAC  = ZONE_B1_FRAC[CUR_ZONE] || 0.60;
-const SPYL_FRAC = 0.20;
+// ── MONTHLY ALLOCATION TABLE ─────────────────────────────────────────────────
+// Re-renders the table when user changes the deployment input.
+// Handles SGOV parent + 3 sub-rows (Cash Dry Powder, SpaceX, Anthropic).
+// Allocation math uses sub-rows and equity rows; parent aggregates for display.
+const SGOV_SUB_TREE = {{"Cash Dry Powder":"├─", "SpaceX":"├─", "Anthropic":"└─"}};
 
-// Fetch live prices from card data attributes
-function getLivePrices(){{
-  const prices={{}};
-  document.querySelectorAll('.fv-card').forEach(card=>{{
-    const tk=card.dataset.ticker;
-    const pr=parseFloat(card.dataset.price);
-    if(tk&&pr) prices[tk]=pr;
+function renderAllocTable(){{
+  const deploy = parseFloat(document.getElementById('deployInput').value)||0;
+  const rows = DATA.alloc_rows;
+  const tbody = document.getElementById('allocBody');
+
+  // Open sleeves for renormalization math: positive gap, EXCLUDING sgov_parent.
+  // (Sub-rows carry the real matrix weights; parent is display-only aggregation.)
+  const openRows = rows.filter(r => r.gap_dollar > 100 && r.row_type !== 'sgov_parent');
+  const openMatrixTotal = openRows.reduce((s, r) => s + r.target_pct, 0);
+
+  // Per-row allocation $ by pure matrix weight (no gap cap — always deploy full input)
+  const allocAmts = {{}};
+  openRows.forEach(r => {{
+    const renormShare = openMatrixTotal > 0 ? (r.target_pct / openMatrixTotal) : 0;
+    allocAmts[r.ticker] = deploy * renormShare;
   }});
-  return prices;
-}}
 
-function renderTable(){{
-  const cash = parseFloat(document.getElementById('cashInput').value)||0;
-  const prices = getLivePrices();
-  const rows   = ACTION_ROWS;
-  const tbody  = document.getElementById('actionBody');
-  let   deployed = 0;
-  let   html = '';
+  // Aggregate sub-row allocations into the SGOV parent (display only)
+  const sgovParentAlloc = (allocAmts['Cash Dry Powder']||0) + (allocAmts['SpaceX']||0) + (allocAmts['Anthropic']||0);
+  allocAmts['SGOV'] = sgovParentAlloc;
 
-  rows.forEach(r=>{{
-    const price = prices[r.ticker]||0;
-    let alloc = 0;
-    if(r.bucket===1)      alloc = r.b1_w * B1_FRAC * cash;
-    else if(r.bucket===2) alloc = SPYL_FRAC * cash;
-    else if(r.bucket===3) alloc = 0.05 * cash * (r.urgency!=='SKIP'?1:0);
+  // Total: sum unique sleeves only (don't double-count parent)
+  const totalAllocated = Object.entries(allocAmts)
+    .filter(([t]) => t !== 'SGOV')
+    .reduce((a, [, v]) => a + v, 0);
+  const unallocated = Math.max(0, deploy - totalAllocated);
 
-    const skip = r.urgency==='SKIP' || r.bucket===0;
-    if(!skip) deployed += alloc;
+  let html = '';
+  rows.forEach(r => {{
+    const gap = r.gap_dollar;
+    const rowType = r.row_type || 'equity';
+    const isParent = rowType === 'sgov_parent';
+    const isSub = rowType === 'sgov_sub';
 
-    const shares = (price>0&&alloc>0&&!skip) ? Math.floor(alloc/price) : 0;
-    const limit  = (price>0) ? (price*1.003).toFixed(price<10?3:2) : '—';
-    const fmtN = v => Math.round(v).toString().replace(/(\d)(?=(\d\d\d)+(?!\d))/g,'$1,');
-    const allocFmt = alloc>0&&!skip ? '$'+fmtN(alloc) : '—';
-    const sharesFmt = shares>0 ? shares : (skip?'—':'<1');
-    const limitFmt  = shares>0&&!skip ? '$'+limit : '—';
-    const rowStyle  = skip ? 'opacity:.45' : '';
+    let gapCls = 'alloc-ok';
+    let sharesStr = '—';
+    let allocStr = '—';
+    let allocAmt = 0;
 
-    const bktLabel  = r.bucket===1?'Bucket 1 · AI Alpha':r.bucket===2?'Bucket 2 · SPYL':r.bucket===3?'Bucket 3 · Asymmetric':'Hold';
+    if(gap > 100){{
+      gapCls = 'alloc-red';
+      allocAmt = allocAmts[r.ticker] || 0;
+      allocStr = allocAmt > 0 ? '$' + Math.round(allocAmt).toLocaleString() : '—';
+      // Shares column
+      if(r.ticker === 'SpaceX' || r.ticker === 'Anthropic' || r.ticker === 'SGOV' || r.ticker === 'Cash Dry Powder'){{
+        sharesStr = '—';
+      }} else if(r.live_price && r.live_price > 0 && allocAmt > 0){{
+        const shares = Math.floor(allocAmt / r.live_price);
+        sharesStr = shares > 0 ? shares.toString() : '<1';
+      }}
+    }} else if(gap < -100){{
+      gapCls = 'alloc-green';
+      sharesStr = 'OVER (locked)';
+    }}
 
-    html += `<tr style="${{rowStyle}}">
-      <td><div class="at-ticker">${{r.ticker}}</div><div class="at-bucket">${{bktLabel}}</div></td>
-      <td style="font-size:11px">${{bktLabel.split(' ')[0]+' '+bktLabel.split(' ')[1]}}</td>
-      <td><span class="at-action ${{r.dep_cls}}">${{r.action}}</span></td>
-      <td><span class="urgency-${{r.urgency}}">${{r.urgency}}</span></td>
-      <td style="font-family:'Syne',sans-serif;font-weight:700">${{price>0?'$'+price.toLocaleString('en',{{minimumFractionDigits:price<100?2:0}}):'—'}}</td>
-      <td class="at-alloc" style="color:${{skip?'var(--mut)':'var(--txt)'}}">${{allocFmt}}</td>
-      <td class="at-shares">${{sharesFmt}}</td>
-      <td class="at-limit">${{limitFmt}}</td>
+    const gapSign = gap > 0 ? '+' : '';
+    const priceStr = r.live_price ? '$' + r.live_price.toFixed(2) : '—';
+
+    // Row class and ticker display
+    let rowCls, tickerHtml;
+    if(isParent){{
+      rowCls = 'alloc-sgov-parent';
+      tickerHtml = `<strong>${{r.ticker}}</strong><div class="alloc-sleeve">${{r.sleeve}}</div>`;
+    }} else if(isSub){{
+      rowCls = 'alloc-sgov-sub';
+      const tree = SGOV_SUB_TREE[r.ticker] || '├─';
+      tickerHtml = `<span class="alloc-tree">${{tree}}</span> ${{r.ticker}}<div class="alloc-sleeve alloc-sub-sleeve">${{r.sleeve}}</div>`;
+    }} else {{
+      rowCls = '';
+      tickerHtml = `<strong>${{r.ticker}}</strong><div class="alloc-sleeve">${{r.sleeve}}</div>`;
+    }}
+
+    html += `<tr class="${{rowCls}}">
+        <td>${{tickerHtml}}</td>
+        <td class="alloc-num">${{(r.target_pct*100).toFixed(2)}}%</td>
+        <td class="alloc-num">$${{Math.round(r.current_dollar).toLocaleString()}}</td>
+        <td class="alloc-num">$${{Math.round(r.target_dollar).toLocaleString()}}</td>
+        <td class="alloc-num ${{gapCls}}">${{gapSign}}$${{Math.round(gap).toLocaleString()}}</td>
+        <td class="alloc-num">${{priceStr}}</td>
+        <td class="alloc-num"><strong>${{allocStr}}</strong></td>
+        <td class="alloc-num">${{sharesStr}}</td>
+        <td><span class="alloc-act">${{r.action || '—'}}</span><div class="alloc-note">${{r.notes || ''}}</div></td>
+      </tr>`;
+  }});
+
+  // Totals row — clean, no parenthetical breakdown
+  const unallocMsg = unallocated > 10 ? `Unallocated $${{Math.round(unallocated).toLocaleString()}}` : 'Fully deployed';
+  html += `<tr class="alloc-totals">
+      <td colspan="6"><strong>TOTAL DEPLOYED</strong></td>
+      <td class="alloc-num"><strong>$${{Math.round(totalAllocated).toLocaleString()}}</strong></td>
+      <td class="alloc-num">—</td>
+      <td><span class="alloc-note">${{unallocMsg}}</span></td>
     </tr>`;
-  }});
-
   tbody.innerHTML = html;
-  const residual = cash - deployed;
-  const fmtResidual = v => Math.round(v).toString().replace(/(\d)(?=(\d\d\d)+(?!\d))/g,'$1,');
-  document.getElementById('residualAmt').textContent =
-    '$'+fmtResidual(residual) + ' → dry powder / PHP buffer';
 }}
 
-// ── STOCK PERFORMANCE CHART ───────────────────────────────────────────────────
+// ── PORTFOLIO PERFORMANCE CHART ───────────────────────────────────────────────
 function setTab(h){{
   curTab=h;
   document.querySelectorAll('.tab').forEach(b=>b.classList.toggle('on',b.textContent.trim()===h||b.textContent.trim()===h+' / '+h));
@@ -1835,18 +2112,11 @@ function setScale(s){{
   document.getElementById('bg').classList.toggle('on',useLog);
   render();
 }}
-function setBands(v){{
-  showBands=v;
-  document.getElementById('bbon').classList.toggle('on',v);
-  document.getElementById('bboff').classList.toggle('on',!v);
-  document.getElementById('bandLeg').style.opacity=v?1:0.3;
-  render();
-}}
 
 function render(){{
   const hd=DATA.horizons[curTab];
   if(!hd)return;
-  const keys=['SPY','MAG7','TSLA','BTC'];
+  const keys=['SPYL','MAG6','PORTFOLIO'];
 
   // Performance cards
   document.getElementById('cards').innerHTML=keys.map(k=>{{
@@ -1862,20 +2132,18 @@ function render(){{
     </div>`;
   }}).join('');
 
-  // Outperformance
-  const spy=hd['SPY'];
-  if(spy) document.getElementById('outperf').innerHTML=['MAG7','TSLA','BTC'].map(k=>{{
+  // Outperformance vs SPYL
+  const spyl=hd['SPYL'];
+  if(spyl) document.getElementById('outperf').innerHTML=['MAG6','PORTFOLIO'].map(k=>{{
     const d=hd[k];if(!d)return'';
-    const a=d.ret-spy.ret,col=a>=0?'var(--grn)':'var(--red)',sign=a>=0?'+':'';
-    return `<span class="op">${{{{MAG7:'Mag7',TSLA:'Tesla',BTC:'Bitcoin'}}[k]}}: <span style="color:${{col}}">${{sign}}${{a.toFixed(1)}}pts vs SPY</span></span>`;
+    const a=d.ret-spyl.ret,col=a>=0?'var(--grn)':'var(--red)',sign=a>=0?'+':'';
+    return `<span class="op">${{NAMES[k]}}: <span style="color:${{col}}">${{sign}}${{a.toFixed(1)}}pts vs SPYL</span></span>`;
   }}).join('');
 
-  // Method note
   const isLong=LONG_H.has(curTab);
-  const method=isLong?'CAGR geometric compounding':curTab==='1Y'||curTab==='YTD'?'Analyst target convergence':'Geometric Brownian Motion';
-  document.getElementById('note').textContent=`Projection: ${{method}} · Dashed = forward · 90% vol bands on Tesla & Bitcoin`;
+  const method=isLong?'CAGR geometric compounding':'Geometric Brownian Motion (vol-adjusted)';
+  document.getElementById('note').textContent=`Projection: ${{method}} · Dashed = forward · My Portfolio = active + legacy weighted`;
 
-  // Chart
   if(chartInst){{chartInst.destroy();chartInst=null;}}
   const datasets=[];
   const todayX=new Date();
@@ -1886,16 +2154,7 @@ function render(){{
     datasets.push({{label:nm,data:d.hist.map(([dt,v])=>{{return{{x:new Date(dt+'T12:00:00'),y:v}};}}),borderColor:col,backgroundColor:'transparent',borderWidth:2.5,pointRadius:0,tension:.12,borderDash:[]}});
     if(d.proj&&d.proj.length){{
       const lh=d.hist[d.hist.length-1];
-      datasets.push({{label:nm+' →',data:[{{x:new Date(lh[0]+'T12:00:00'),y:lh[1]}},...d.proj.map(([dt,v])=>{{return{{x:new Date(dt+'T12:00:00'),y:v}};}})] ,borderColor:col,backgroundColor:'transparent',borderWidth:1.8,pointRadius:0,tension:.12,borderDash:[6,4]}});
-    }}
-    if(showBands&&d.band_upper&&d.band_lower){{
-      const hex=col.replace('#',''),r=parseInt(hex.slice(0,2),16),g=parseInt(hex.slice(2,4),16),b=parseInt(hex.slice(4,6),16);
-      const fc=`rgba(${{r}},${{g}},${{b}},0.10)`;
-      const lh=d.hist[d.hist.length-1];
-      const stU=[{{x:new Date(lh[0]+'T12:00:00'),y:lh[1]}},...d.band_upper.map(([dt,v])=>{{return{{x:new Date(dt+'T12:00:00'),y:v}};}})] ;
-      const stL=[{{x:new Date(lh[0]+'T12:00:00'),y:lh[1]}},...d.band_lower.map(([dt,v])=>{{return{{x:new Date(dt+'T12:00:00'),y:v}};}})] ;
-      datasets.push({{label:`_${{k}}_u`,data:stU,borderColor:'transparent',backgroundColor:fc,fill:'+1',borderWidth:0,pointRadius:0,tension:.12}});
-      datasets.push({{label:`_${{k}}_l`,data:stL,borderColor:'transparent',backgroundColor:fc,fill:false,borderWidth:0,pointRadius:0,tension:.12}});
+      datasets.push({{label:nm+' →',data:[{{x:new Date(lh[0]+'T12:00:00'),y:lh[1]}},...d.proj.map(([dt,v])=>{{return{{x:new Date(dt+'T12:00:00'),y:v}};}})],borderColor:col,backgroundColor:'transparent',borderWidth:1.8,pointRadius:0,tension:.12,borderDash:[6,4]}});
     }}
   }});
 
@@ -1937,7 +2196,7 @@ function render(){{
 // ── INIT ──────────────────────────────────────────────────────────────────────
 renderYC();
 render();
-renderTable();
+renderAllocTable();
 </script>
 </body>
 </html>"""
