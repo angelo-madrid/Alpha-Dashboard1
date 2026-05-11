@@ -125,8 +125,8 @@ import requests
 # ║   If your dashboard ever shows "rate limit exceeded", rotate the          ║
 # ║   Twelve Data key (30 sec at twelvedata.com → API Keys → revoke + new).   ║
 # ╚═══════════════════════════════════════════════════════════════════════════╝
-TWELVEDATA_API_KEY = ""   # ← paste your Twelve Data key between the quotes
-FRED_API_KEY       = ""   # ← paste your FRED key between the quotes
+TWELVEDATA_API_KEY = "0fbd7cea5285446e85d0880d27fd9085"   # ← paste your Twelve Data key between the quotes
+FRED_API_KEY       = "b8a3d518f4e1032f09e949b4ed7c2214"   # ← paste your FRED key between the quotes
 
 # Allow env-variable override:
 TWELVEDATA_KEY = os.environ.get("TWELVEDATA_API_KEY", TWELVEDATA_API_KEY).strip()
