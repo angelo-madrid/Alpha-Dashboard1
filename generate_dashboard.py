@@ -6,6 +6,15 @@
 #   PAIRS WITH: refresh.yml v2.3.1+
 #   STRATEGY  : Bogle/Buffett anchored, Mag6-dominant, Active vs Legacy split
 #   CHANGELOG :
+#     3.0.7 — Holdings externalized to holdings.json (May 11):
+#             • HOLDINGS dict moved to holdings.json — edit there after trades.
+#             • Script loads positions at runtime via _load_holdings().
+#             • Embedded fallback HOLDINGS preserved in script for safety
+#                (used if holdings.json missing or malformed).
+#             • Account classification + labels now live in JSON file too.
+#             • Schema version field for future-proofing.
+#             • Trade-update workflow: edit holdings.json in GitHub web UI,
+#                commit, wait for next refresh. No script changes needed.
 #     3.0.6 — Full-deploy allocation (May 11):
 #             • Removed gap-cap on allocation: input always fully deployed.
 #             • Each open sleeve gets its renormalized matrix share of input,
@@ -84,8 +93,8 @@
 #     2.3.3 — Pre-populated FV_OVERLAY with May 2026 consensus.
 #     2.3.0 — Twelve Data + FRED migration.
 # ═════════════════════════════════════════════════════════════════════════════
-SCRIPT_VERSION = "3.0.6"
-SCRIPT_DATE    = "2026-05-11"  # v3.0.6 patch
+SCRIPT_VERSION = "3.0.7"
+SCRIPT_DATE    = "2026-05-11"  # v3.0.7 patch
 
 """
 generate_dashboard.py — Alpha Dashboard v3
@@ -323,15 +332,28 @@ def fetch_history(ticker_list, start_date, end_date, max_attempts=3):
 # ─────────────────────────────────────────────────────────────────────────────
 
 # ── HOLDINGS — CURRENT POSITIONS ──────────────────────────────────────────────
-# Edit this when you execute trades. Format:
-#   ACCOUNT: { TICKER: {"shares": N, "avg_cost": price}, "CASH": amount }
+# Holdings now live in holdings.json (separate file for easier editing).
+# Update that file via GitHub web UI after each trade — no need to touch this script.
 #
 # CLASSIFICATION (per strategy doc):
 #   ACTIVE  = IBKR  → drives zone matrix, receives monthly contributions
 #   LEGACY  = Citi* (frozen) + CRYPTO (BTC, never add)
 #
 # Note: VOO in IBKR is conceptually merged with SPYL (same exposure).
-HOLDINGS = {
+#
+# Format per account in holdings.json:
+#   {
+#     "classification": "ACTIVE" | "LEGACY",
+#     "label": "Display Name",
+#     "TICKER": {"shares": N, "avg_cost": price},
+#     "CASH": amount
+#   }
+#
+# Fallback: if holdings.json is missing or malformed, the embedded HOLDINGS
+# dict below kicks in so the script still runs (with potentially stale data).
+
+# Embedded fallback (also serves as the default if no holdings.json exists)
+_HOLDINGS_FALLBACK = {
     "IBKR": {
         "META": {"shares": 18,   "avg_cost": 612.04},
         "MSFT": {"shares": 25,   "avg_cost": 419.18},
@@ -357,23 +379,68 @@ HOLDINGS = {
         "CASH": 737.30,
     },
     "CRYPTO": {
-        # BTC: avg cost is effective USD-equivalent including cryptoback rewards.
-        # Updated 2026-05-10. Held indefinitely; never add per strategy.
         "BTC": {"shares": 0.18486736, "avg_cost": 91760},
     },
 }
-
-# Account classification: which accounts are ACTIVE vs LEGACY
-ACTIVE_ACCOUNTS = ["IBKR"]
-LEGACY_ACCOUNTS = ["CITI_401K", "CITI_ROTH", "CITI_BROK", "CRYPTO"]
-
-ACCOUNT_LABELS = {
+_ACTIVE_FALLBACK = ["IBKR"]
+_LEGACY_FALLBACK = ["CITI_401K", "CITI_ROTH", "CITI_BROK", "CRYPTO"]
+_LABELS_FALLBACK = {
     "IBKR":      "IBKR",
     "CITI_401K": "Citi 401k",
     "CITI_ROTH": "Citi Roth",
     "CITI_BROK": "Citi Brokerage",
     "CRYPTO":    "Crypto (BTC)",
 }
+
+def _load_holdings():
+    """Load holdings from holdings.json next to the script.
+    Returns (HOLDINGS, ACTIVE_ACCOUNTS, LEGACY_ACCOUNTS, ACCOUNT_LABELS, meta_dict).
+    Falls back to embedded defaults if the file is missing or malformed."""
+    holdings_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "holdings.json")
+    if not os.path.exists(holdings_path):
+        print(f"⚠ holdings.json not found at {holdings_path} — using embedded fallback")
+        return _HOLDINGS_FALLBACK, _ACTIVE_FALLBACK, _LEGACY_FALLBACK, _LABELS_FALLBACK, {}
+    try:
+        with open(holdings_path) as f:
+            data = json.load(f)
+    except json.JSONDecodeError as e:
+        print(f"⚠ holdings.json malformed ({e}) — using embedded fallback")
+        return _HOLDINGS_FALLBACK, _ACTIVE_FALLBACK, _LEGACY_FALLBACK, _LABELS_FALLBACK, {}
+
+    accounts_raw = data.get("accounts", {})
+    if not accounts_raw:
+        print("⚠ holdings.json has no 'accounts' key — using embedded fallback")
+        return _HOLDINGS_FALLBACK, _ACTIVE_FALLBACK, _LEGACY_FALLBACK, _LABELS_FALLBACK, {}
+
+    holdings = {}
+    active = []
+    legacy = []
+    labels = {}
+    for acct_name, acct_data in accounts_raw.items():
+        # Strip out the schema fields (classification, label, comments starting with _)
+        positions = {}
+        for k, v in acct_data.items():
+            if k.startswith("_"):           # comment field, skip
+                continue
+            if k in ("classification", "label"):
+                continue
+            positions[k] = v
+        holdings[acct_name] = positions
+
+        cls = acct_data.get("classification", "LEGACY").upper()
+        if cls == "ACTIVE":
+            active.append(acct_name)
+        else:
+            legacy.append(acct_name)
+        labels[acct_name] = acct_data.get("label", acct_name)
+
+    meta = data.get("_meta", {})
+    print(f"✓ Loaded holdings.json (last updated: {meta.get('last_updated', 'unknown')})")
+    if meta.get("last_trade_notes"):
+        print(f"  Last trade: {meta['last_trade_notes']}")
+    return holdings, active, legacy, labels, meta
+
+HOLDINGS, ACTIVE_ACCOUNTS, LEGACY_ACCOUNTS, ACCOUNT_LABELS, HOLDINGS_META = _load_holdings()
 
 # ── ZONE MATRIX — ACTIVE SLEEVES ──────────────────────────────────────────────
 # Per strategy doc Section 3. Percentages apply to ACTIVE capital (IBKR).
