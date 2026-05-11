@@ -1,0 +1,53 @@
+{
+  "_meta": {
+    "schema_version": "1.0",
+    "last_updated": "2026-05-10",
+    "last_trade_notes": "Initial extract from generate_dashboard.py v3.0.6. No trades yet on new strategy.",
+    "_instructions": "Edit this file in GitHub web UI after each trade. Update share counts and avg_cost. Use weighted-average formula: new_avg = (old_shares * old_cost + new_shares * fill_price) / (old_shares + new_shares). CASH is a plain number (no shares/avg_cost). After committing, dashboard auto-refreshes on next cron or manual trigger."
+  },
+
+  "accounts": {
+    "IBKR": {
+      "classification": "ACTIVE",
+      "label": "IBKR",
+      "META": {"shares": 18,   "avg_cost": 612.04},
+      "MSFT": {"shares": 25,   "avg_cost": 419.18},
+      "NVDA": {"shares": 50,   "avg_cost": 202.57},
+      "SPYL": {"shares": 2065, "avg_cost": 17.72},
+      "VOO":  {"shares": 28,   "avg_cost": 605.89},
+      "CASH": 31144.43
+    },
+
+    "CITI_401K": {
+      "classification": "LEGACY",
+      "label": "Citi 401k",
+      "AMZN": {"shares": 100, "avg_cost": 163.51},
+      "GOOG": {"shares": 141, "avg_cost": 122.71},
+      "META": {"shares": 25,  "avg_cost": 329.06},
+      "CASH": 59.06
+    },
+
+    "CITI_ROTH": {
+      "classification": "LEGACY",
+      "label": "Citi Roth",
+      "AAPL": {"shares": 134, "avg_cost": 127.05},
+      "META": {"shares": 25,  "avg_cost": 339.97},
+      "CASH": 179.42
+    },
+
+    "CITI_BROK": {
+      "classification": "LEGACY",
+      "label": "Citi Brokerage",
+      "META": {"shares": 12, "avg_cost": 154.14},
+      "VOO":  {"shares": 7,  "avg_cost": 388.45},
+      "CASH": 737.30
+    },
+
+    "CRYPTO": {
+      "classification": "LEGACY",
+      "label": "Crypto (BTC)",
+      "_note": "BTC avg_cost is effective USD-equivalent including cryptoback rewards. Updated 2026-05-10. Strategy: hold indefinitely, never add.",
+      "BTC": {"shares": 0.18486736, "avg_cost": 91760}
+    }
+  }
+}
