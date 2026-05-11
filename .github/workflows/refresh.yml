@@ -1,16 +1,18 @@
 # ── REFRESH WORKFLOW ─────────────────────────────────────────────────────────
-# VERSION : 3.0.6
+# VERSION : 3.0.7
 # DATE    : 2026-05-11
-# Pairs with: generate_dashboard.py v3.0.6
-# Changes from 2.3.1:
+# Pairs with: generate_dashboard.py v3.0.6 (or later)
+# Changes from 3.0.6:
+#   - FIX: Removed `cache: 'pip'` from setup-python step. That option requires
+#     a requirements.txt or pyproject.toml in the repo, which we don't have
+#     (deps installed inline). Caused workflow to fail at "Set up Python" step.
+# Changes from 2.3.1 (carried forward):
 #   - Script v3.0.x no longer imports yfinance or curl_cffi → dropped from install
 #   - Added concurrency guard (prevents overlapping scheduled + manual runs)
 #   - Cleaner output verification with explicit byte-count threshold
 #   - API keys remain HARDCODED in generate_dashboard.py (no GitHub Secrets)
-# Changes from 3.0.0 (workflow itself):
-#   - Banner version bumped to track script version (cosmetic only — no logic changes)
 # ─────────────────────────────────────────────────────────────────────────────
-name: Refresh Dashboard v3.0.6
+name: Refresh Dashboard v3.0.7
 on:
   schedule:
     - cron: '0 6 * * *'   # 06:00 UTC = 14:00 Manila daily
@@ -36,11 +38,12 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-          cache: 'pip'
+          # Note: no pip cache — would require requirements.txt in repo.
+          # Deps are installed inline below; adds ~30s per run but no extra files.
 
       - name: Print workflow version
         run: |
-          echo "── refresh.yml v3.0.6 · 2026-05-11 ──"
+          echo "── refresh.yml v3.0.7 · 2026-05-11 ──"
           echo "Triggered: $(date -u +'%Y-%m-%d %H:%M:%S UTC')"
           echo "Repo: $GITHUB_REPOSITORY"
           echo "Ref:  $GITHUB_REF"
