@@ -1,19 +1,24 @@
 # ── REFRESH WORKFLOW ─────────────────────────────────────────────────────────
-# VERSION : 2.3.1
-# DATE    : 2026-05-10
-# Pairs with: generate_dashboard.py v2.3.1
-# Changes from 2.2.0:
-#   - Switched from Finnhub to Twelve Data (stocks/crypto/ETFs) + FRED (yields)
-#   - API keys hardcoded directly in generate_dashboard.py (no GitHub Secrets)
-#   - Dropped curl_cffi/yfinance heavy deps (not needed)
+# VERSION : 3.0.6
+# DATE    : 2026-05-11
+# Pairs with: generate_dashboard.py v3.0.6
+# Changes from 2.3.1:
+#   - Script v3.0.x no longer imports yfinance or curl_cffi → dropped from install
+#   - Added concurrency guard (prevents overlapping scheduled + manual runs)
+#   - Cleaner output verification with explicit byte-count threshold
+#   - API keys remain HARDCODED in generate_dashboard.py (no GitHub Secrets)
+# Changes from 3.0.0 (workflow itself):
+#   - Banner version bumped to track script version (cosmetic only — no logic changes)
 # ─────────────────────────────────────────────────────────────────────────────
-
-name: Refresh Dashboard v2.3.1
-
+name: Refresh Dashboard v3.0.6
 on:
   schedule:
     - cron: '0 6 * * *'   # 06:00 UTC = 14:00 Manila daily
   workflow_dispatch:        # manual trigger from Actions tab
+
+concurrency:
+  group: dashboard-refresh
+  cancel-in-progress: false   # let in-flight refresh finish before next one
 
 permissions:
   contents: write           # REQUIRED so the bot can push back to main
@@ -21,6 +26,7 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 10     # typical run ~3 min; generous ceiling
 
     steps:
       - name: Checkout repo
@@ -30,10 +36,11 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+          cache: 'pip'
 
       - name: Print workflow version
         run: |
-          echo "── refresh.yml v2.3.1 · 2026-05-10 ──"
+          echo "── refresh.yml v3.0.6 · 2026-05-11 ──"
           echo "Triggered: $(date -u +'%Y-%m-%d %H:%M:%S UTC')"
           echo "Repo: $GITHUB_REPOSITORY"
           echo "Ref:  $GITHUB_REF"
@@ -44,13 +51,15 @@ jobs:
         run: |
           set -e
           pip install --upgrade pip
-          # Twelve Data and FRED both use plain HTTP; pandas/numpy for data ops.
-          # yfinance kept as third-tier fallback (will fail on Actions but harmless).
-          pip install pandas numpy requests yfinance==0.2.50
+          # v3.0.x dropped yfinance and curl_cffi — pure requests + pandas + numpy.
+          # Twelve Data and FRED both use plain HTTP via requests.
+          pip install pandas numpy requests
           echo "── Installed packages ──"
-          pip show pandas numpy requests yfinance | grep -E "^(Name|Version)"
+          pip show pandas numpy requests | grep -E "^(Name|Version)"
 
       - name: Regenerate index.html
+        env:
+          CI: "1"             # suppresses browser auto-open at end of script
         run: |
           set -e
           echo "── Running generate_dashboard.py ──"
@@ -59,7 +68,13 @@ jobs:
           ls -la index.html
           echo "── First 5 lines of index.html ──"
           head -5 index.html
-          echo "── File size: $(wc -c < index.html) bytes ──"
+          BYTES=$(wc -c < index.html)
+          echo "── File size: $BYTES bytes ──"
+          # Sanity threshold: a real index.html is ~200KB+; <50KB suggests failure
+          if [ "$BYTES" -lt 50000 ]; then
+            echo "⚠ WARNING: index.html is suspiciously small ($BYTES bytes)"
+            exit 1
+          fi
 
       - name: Commit and push if changed
         run: |
@@ -71,7 +86,7 @@ jobs:
             echo "── No changes to index.html — skipping commit ──"
           else
             echo "── Committing changes ──"
-            git commit -m "chore: refresh dashboard v2.3.1 $(date -u +'%Y-%m-%d %H:%M UTC')"
+            git commit -m "chore: refresh dashboard v3.0.6 $(date -u +'%Y-%m-%d %H:%M UTC')"
             git push
             echo "── Pushed successfully ──"
           fi
