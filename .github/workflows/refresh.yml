@@ -1,7 +1,10 @@
 # ── REFRESH WORKFLOW ─────────────────────────────────────────────────────────
-# VERSION : 3.0.7
+# VERSION : 3.0.8
 # DATE    : 2026-05-11
-# Pairs with: generate_dashboard.py v3.0.6 (or later)
+# Pairs with: generate_dashboard.py v3.0.7 (or later)
+# Changes from 3.0.7:
+#   - Added holdings.json diagnostic check before script run.
+#     Shows last_updated and last_trade_notes from metadata, or warns if missing.
 # Changes from 3.0.6:
 #   - FIX: Removed `cache: 'pip'` from setup-python step. That option requires
 #     a requirements.txt or pyproject.toml in the repo, which we don't have
@@ -12,7 +15,7 @@
 #   - Cleaner output verification with explicit byte-count threshold
 #   - API keys remain HARDCODED in generate_dashboard.py (no GitHub Secrets)
 # ─────────────────────────────────────────────────────────────────────────────
-name: Refresh Dashboard v3.0.7
+name: Refresh Dashboard v3.0.8
 on:
   schedule:
     - cron: '0 6 * * *'   # 06:00 UTC = 14:00 Manila daily
@@ -43,7 +46,7 @@ jobs:
 
       - name: Print workflow version
         run: |
-          echo "── refresh.yml v3.0.7 · 2026-05-11 ──"
+          echo "── refresh.yml v3.0.8 · 2026-05-11 ──"
           echo "Triggered: $(date -u +'%Y-%m-%d %H:%M:%S UTC')"
           echo "Repo: $GITHUB_REPOSITORY"
           echo "Ref:  $GITHUB_REF"
@@ -65,6 +68,13 @@ jobs:
           CI: "1"             # suppresses browser auto-open at end of script
         run: |
           set -e
+          # Diagnostic: check for holdings.json
+          if [ -f "holdings.json" ]; then
+            echo "── holdings.json found ──"
+            python -c "import json; d=json.load(open('holdings.json')); m=d.get('_meta',{}); print(f'  Last updated: {m.get(\"last_updated\",\"unknown\")}'); print(f'  Last trade: {m.get(\"last_trade_notes\",\"none\")}')"
+          else
+            echo "⚠ holdings.json NOT found — script will use embedded fallback"
+          fi
           echo "── Running generate_dashboard.py ──"
           python generate_dashboard.py
           echo "── Output check ──"
@@ -89,7 +99,7 @@ jobs:
             echo "── No changes to index.html — skipping commit ──"
           else
             echo "── Committing changes ──"
-            git commit -m "chore: refresh dashboard v3.0.6 $(date -u +'%Y-%m-%d %H:%M UTC')"
+            git commit -m "chore: refresh dashboard v3.0.7 $(date -u +'%Y-%m-%d %H:%M UTC')"
             git push
             echo "── Pushed successfully ──"
           fi
