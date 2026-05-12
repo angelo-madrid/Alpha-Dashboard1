@@ -1,11 +1,41 @@
 # ═════════════════════════════════════════════════════════════════════════════
 # ALPHA DASHBOARD — generate_dashboard.py
 # ═════════════════════════════════════════════════════════════════════════════
-#   VERSION   : 3.0.9
+#   VERSION   : 3.2.0
 #   DATE      : 2026-05-12
-#   PAIRS WITH: refresh.yml v3.0.8+
+#   PAIRS WITH: refresh.yml v3.0.8+, holdings.json v1.0+, Google Sheets (4 tabs)
 #   STRATEGY  : Bogle/Buffett anchored, Mag6-dominant, Active vs Legacy split
 #   CHANGELOG :
+#     3.2.0 — Google Sheets data source for cashflow data (May 12):
+#             • cashflow.json deprecated as primary source — Google Sheets
+#                is now the source of truth for balance sheet, cashflow,
+#                major cashouts, and settings data.
+#             • Sheet at https://docs.google.com/spreadsheets/d/1Kal6N5jcJz3wUfBhxvkIS1YMm5ToEz4CI6tsZPZSZG4
+#             • Script fetches 4 published CSV tabs at refresh time:
+#                Balance_Sheet, Cashflow, Major_Cashouts, Settings.
+#             • Edit values directly in the Sheet — dashboard auto-syncs
+#                on next workflow run. No GitHub commits needed for data updates.
+#             • Fallback: if Sheets fetch fails, script falls back to
+#                cashflow.json (still in repo as safety net).
+#             • Phase 2 (Cashflow) and Phase 3 (Major Cashouts) data is
+#                loaded but not yet rendered. Will be wired up in future iterations.
+#     3.1.0 — Total Holdings tab — Phase 1: Balance Sheet (May 12):
+#             • Added second top-level tab "Total Holdings" alongside the
+#                Investment Dashboard. Switches via tab buttons; preference
+#                persists in localStorage.
+#             • New file: cashflow.json holds non-investment assets and
+#                liabilities (real estate, vehicles, business equity, other
+#                investments, cash accounts, liabilities). Loaded at runtime.
+#             • Balance Sheet view: Total Assets − Liabilities = Net Worth
+#                headline, plus categorized asset table and liabilities table.
+#             • Investment accounts auto-sync from holdings.json × live prices
+#                (no duplication with cashflow.json).
+#             • PHP/USD currency toggle: all values re-render in chosen ccy
+#                on click. Toggle state persists in localStorage.
+#             • USD/PHP FX rate fetched live from Twelve Data forex endpoint
+#                (USD/PHP pair). Fallback to ₱58/$ if API fails.
+#             • Phase 2 (Cashflow: income vs expenses) and Phase 3 (15-year
+#                projection with major cashouts) planned for future iteration.
 #     3.0.9 — SPYL price calibration (May 12):
 #             • Updated SPYL_RATIO from 0.0241 → 0.02477.
 #             • Calibrated against actual IBKR SPYL.L quote ($18.31).
@@ -103,7 +133,7 @@
 #     2.3.3 — Pre-populated FV_OVERLAY with May 2026 consensus.
 #     2.3.0 — Twelve Data + FRED migration.
 # ═════════════════════════════════════════════════════════════════════════════
-SCRIPT_VERSION = "3.0.9"
+SCRIPT_VERSION = "3.2.0"
 SCRIPT_DATE    = "2026-05-12"
 
 """
@@ -144,8 +174,8 @@ import requests
 # ║   If your dashboard ever shows "rate limit exceeded", rotate the          ║
 # ║   Twelve Data key (30 sec at twelvedata.com → API Keys → revoke + new).   ║
 # ╚═══════════════════════════════════════════════════════════════════════════╝
-TWELVEDATA_API_KEY = "0fbd7cea5285446e85d0880d27fd9085"   # ← paste your Twelve Data key between the quotes
-FRED_API_KEY       = "b8a3d518f4e1032f09e949b4ed7c2214"   # ← paste your FRED key between the quotes
+TWELVEDATA_API_KEY = ""   # ← paste your Twelve Data key between the quotes
+FRED_API_KEY       = ""   # ← paste your FRED key between the quotes
 
 # Allow env-variable override:
 TWELVEDATA_KEY = os.environ.get("TWELVEDATA_API_KEY", TWELVEDATA_API_KEY).strip()
@@ -177,6 +207,7 @@ HTTP_SESSION.headers.update({
 def td_symbol(yf_ticker):
     t = yf_ticker.upper()
     if t == "BTC-USD": return "BTC/USD"
+    if t == "USD/PHP": return "USD/PHP"   # forex pair, passed through directly
     if t == "SPYL.L":  return None    # Premium-only on Twelve Data; synthesized from SPY × 0.0241
     if t in ("^TNX", "^IRX"): return None
     return t   # AAPL, MSFT, NVDA, GOOGL, GOOG, META, AMZN, SPY, VOO
@@ -452,6 +483,240 @@ def _load_holdings():
 
 HOLDINGS, ACTIVE_ACCOUNTS, LEGACY_ACCOUNTS, ACCOUNT_LABELS, HOLDINGS_META = _load_holdings()
 
+# ─────────────────────────────────────────────────────────────────────────────
+# CASHFLOW DATA — GOOGLE SHEETS INTEGRATION (Total Holdings tab)
+# ─────────────────────────────────────────────────────────────────────────────
+# Data source: published Google Sheets CSV (4 tabs).
+# Edit values directly in the Sheet at:
+#   https://docs.google.com/spreadsheets/d/1Kal6N5jcJz3wUfBhxvkIS1YMm5ToEz4CI6tsZPZSZG4
+# The dashboard fetches all 4 tabs on each refresh.
+#
+# Fallback: if Sheets fetch fails, fall back to cashflow.json in the repo.
+# This means the Sheet can break without taking down the dashboard.
+
+SHEET_CSV_URLS = {
+    "Balance_Sheet":  "https://docs.google.com/spreadsheets/d/e/2PACX-1vSW4QL7uriDrm8ZjdHkrUi-yzsOZ2XrBvY46JyRsS7ynnt4G6p_SiQ50Ssyz0Y8KPT8DTalVtRvONra/pub?gid=1887223052&single=true&output=csv",
+    "Cashflow":       "https://docs.google.com/spreadsheets/d/e/2PACX-1vSW4QL7uriDrm8ZjdHkrUi-yzsOZ2XrBvY46JyRsS7ynnt4G6p_SiQ50Ssyz0Y8KPT8DTalVtRvONra/pub?gid=168657384&single=true&output=csv",
+    "Major_Cashouts": "https://docs.google.com/spreadsheets/d/e/2PACX-1vSW4QL7uriDrm8ZjdHkrUi-yzsOZ2XrBvY46JyRsS7ynnt4G6p_SiQ50Ssyz0Y8KPT8DTalVtRvONra/pub?gid=2138882399&single=true&output=csv",
+    "Settings":       "https://docs.google.com/spreadsheets/d/e/2PACX-1vSW4QL7uriDrm8ZjdHkrUi-yzsOZ2XrBvY46JyRsS7ynnt4G6p_SiQ50Ssyz0Y8KPT8DTalVtRvONra/pub?gid=669129657&single=true&output=csv",
+}
+
+def _fetch_sheet_csv(name, url, timeout=20):
+    """Fetch one tab's CSV from the published Google Sheets URL.
+    Returns list of dict rows (with column headers as keys), or None on failure."""
+    import csv
+    from io import StringIO
+    try:
+        r = HTTP_SESSION.get(url, timeout=timeout,
+                             headers={"User-Agent": "Mozilla/5.0 (Dashboard)"})
+        if r.status_code != 200:
+            print(f"  ✗ {name}: HTTP {r.status_code}")
+            return None
+        # Google may serve UTF-8 BOM; strip it
+        text = r.text.lstrip("\ufeff")
+        reader = csv.DictReader(StringIO(text))
+        rows = [row for row in reader if any(v.strip() for v in row.values() if v)]
+        return rows
+    except Exception as e:
+        print(f"  ✗ {name}: fetch failed ({type(e).__name__}: {e})")
+        return None
+
+def _parse_balance_sheet_rows(rows):
+    """Convert Balance_Sheet sheet rows → cashflow.json balance_sheet structure.
+    Sheet columns: Category, Subcategory, Label, Value, Currency, Notes"""
+    bs = {
+        "real_estate": [], "vehicles": [], "business_equity": [],
+        "other_investments": [], "cash_accounts": [], "liabilities": [],
+    }
+    for row in rows:
+        cat = (row.get("Category") or "").strip().lower()
+        if not cat or cat not in bs:
+            continue
+        label = (row.get("Label") or "").strip()
+        if not label:
+            continue
+        try:
+            value = float((row.get("Value") or "0").replace(",", ""))
+        except ValueError:
+            value = 0.0
+        ccy = (row.get("Currency") or "USD").strip().upper()
+        note = (row.get("Notes") or "").strip()
+
+        if cat == "cash_accounts":
+            # Cash uses {value, currency} schema
+            bs[cat].append({
+                "label": label,
+                "currency": ccy,
+                "value": value,
+                "_note": note,
+            })
+        elif cat == "liabilities":
+            # Liabilities use balance_usd + limit_usd schema.
+            # Sheet provides Value=balance, limit comes from Notes field.
+            limit = 0.0
+            if "limit:" in note.lower():
+                try:
+                    limit_str = note.lower().split("limit:")[-1].replace("$", "").replace(",", "").strip()
+                    # Extract just the number
+                    import re as _re
+                    m = _re.search(r"[\d.]+", limit_str)
+                    if m: limit = float(m.group())
+                except Exception:
+                    limit = 0.0
+            bs[cat].append({
+                "label": label,
+                "balance_usd": value,
+                "limit_usd": limit,
+                "_note": note,
+            })
+        else:
+            # Standard schema: {label, value_usd, _note}
+            bs[cat].append({
+                "label": label,
+                "value_usd": value,
+                "_note": note,
+            })
+    return bs
+
+def _parse_cashflow_rows(rows):
+    """Convert Cashflow sheet rows → cashflow structure for Phase 2.
+    Sheet columns: Type, Category, Label, Amount_PHP, Frequency, Annual_Total_PHP, Notes
+    Phase 2 not yet rendered — data loaded for future use."""
+    items = []
+    for row in rows:
+        type_ = (row.get("Type") or "").strip().lower()
+        if type_ not in ("income", "expense"):
+            continue
+        try:
+            amount = float((row.get("Amount_PHP") or "0").replace(",", ""))
+            freq = float((row.get("Frequency") or "1").replace(",", ""))
+            annual = float((row.get("Annual_Total_PHP") or "0").replace(",", ""))
+        except ValueError:
+            amount = freq = annual = 0.0
+        items.append({
+            "type": type_,
+            "category": (row.get("Category") or "").strip(),
+            "label": (row.get("Label") or "").strip(),
+            "amount_php": amount,
+            "frequency": freq,
+            "annual_php": annual if annual > 0 else amount * freq,
+            "note": (row.get("Notes") or "").strip(),
+        })
+    return items
+
+def _parse_major_cashouts_rows(rows):
+    """Convert Major_Cashouts sheet rows → list for Phase 3.
+    Sheet columns: Year, Item, Amount_USD, Category, Notes"""
+    items = []
+    for row in rows:
+        try:
+            year = int(row.get("Year") or 0)
+        except ValueError:
+            continue
+        if not year:
+            continue
+        try:
+            amount = float((row.get("Amount_USD") or "0").replace(",", ""))
+        except ValueError:
+            amount = 0.0
+        items.append({
+            "year": year,
+            "item": (row.get("Item") or "").strip(),
+            "amount_usd": amount,
+            "category": (row.get("Category") or "").strip(),
+            "note": (row.get("Notes") or "").strip(),
+        })
+    return sorted(items, key=lambda r: (r["year"], -r["amount_usd"]))
+
+def _parse_settings_rows(rows):
+    """Convert Settings sheet rows → flat dict.
+    Sheet columns: Key, Value, Description"""
+    out = {}
+    for row in rows:
+        k = (row.get("Key") or "").strip()
+        if not k or k.startswith("#"):
+            continue
+        v = (row.get("Value") or "").strip()
+        # Try to parse numeric values
+        try:
+            v_num = float(v.replace(",", ""))
+            out[k] = v_num
+        except ValueError:
+            out[k] = v
+    return out
+
+def _load_cashflow_from_json_fallback():
+    """Fallback: load Balance Sheet from cashflow.json if Sheets fetch fails."""
+    cashflow_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cashflow.json")
+    if not os.path.exists(cashflow_path):
+        print(f"⚠ cashflow.json fallback not found — Total Holdings tab will be empty")
+        return {"balance_sheet": {}, "cashflow": [], "major_cashouts": [], "settings": {}}, {}
+    try:
+        with open(cashflow_path) as f:
+            data = json.load(f)
+        meta = data.get("_meta", {})
+        print(f"  ↪ Using cashflow.json fallback (last updated: {meta.get('last_updated', 'unknown')})")
+        return {
+            "balance_sheet": data.get("balance_sheet", {}),
+            "cashflow": [],
+            "major_cashouts": [],
+            "settings": {},
+        }, meta
+    except json.JSONDecodeError as e:
+        print(f"⚠ cashflow.json malformed ({e})")
+        return {"balance_sheet": {}, "cashflow": [], "major_cashouts": [], "settings": {}}, {}
+
+def _load_cashflow():
+    """Load cashflow data from Google Sheets (preferred) with cashflow.json fallback.
+    Returns (data_dict, meta_dict) where data_dict has keys:
+      balance_sheet   — dict of category → list of items (Phase 1, currently rendered)
+      cashflow        — list of income/expense items (Phase 2, future)
+      major_cashouts  — list of future expenses by year (Phase 3, future)
+      settings        — dict of config key/value pairs"""
+    print("\nFetching cashflow data from Google Sheets...")
+    sheet_data = {}
+    fetch_success = True
+
+    for tab_name, url in SHEET_CSV_URLS.items():
+        rows = _fetch_sheet_csv(tab_name, url)
+        if rows is None:
+            fetch_success = False
+            break
+        sheet_data[tab_name] = rows
+        print(f"  ✓ {tab_name}: {len(rows)} rows")
+
+    if not fetch_success or not sheet_data:
+        print("  ⚠ Sheets fetch incomplete — falling back to cashflow.json")
+        return _load_cashflow_from_json_fallback()
+
+    # Parse each tab into its native structure
+    result = {
+        "balance_sheet":  _parse_balance_sheet_rows(sheet_data.get("Balance_Sheet", [])),
+        "cashflow":       _parse_cashflow_rows(sheet_data.get("Cashflow", [])),
+        "major_cashouts": _parse_major_cashouts_rows(sheet_data.get("Major_Cashouts", [])),
+        "settings":       _parse_settings_rows(sheet_data.get("Settings", [])),
+    }
+    # Diagnostic on Phase 2/3 data (loaded but not yet rendered)
+    cf_items = result["cashflow"]
+    mc_items = result["major_cashouts"]
+    if cf_items:
+        income_total = sum(r["annual_php"] for r in cf_items if r["type"] == "income")
+        expense_total = sum(r["annual_php"] for r in cf_items if r["type"] == "expense")
+        print(f"  ℹ Cashflow data ready (Phase 2 not yet rendered): "
+              f"₱{income_total:,.0f} income / ₱{expense_total:,.0f} expense annual")
+    if mc_items:
+        print(f"  ℹ Major cashouts data ready (Phase 3 not yet rendered): "
+              f"{len(mc_items)} items spanning {mc_items[0]['year']}-{mc_items[-1]['year']}")
+
+    meta = {
+        "source": "google_sheets",
+        "last_updated": fetched_at if 'fetched_at' in globals() else "",
+    }
+    return result, meta
+
+# NB: _load_cashflow() is called AFTER price/forex fetch so this is just the bind.
+# Actual call happens after fetched_at is set.
+
 # ── ZONE MATRIX — ACTIVE SLEEVES ──────────────────────────────────────────────
 # Per strategy doc Section 3. Percentages apply to ACTIVE capital (IBKR).
 # Sleeves: SPYL (anchor), MAG6 (alpha), SPACEX (earmark), ANTHROPIC (earmark), CASH
@@ -618,6 +883,18 @@ SPYL_RATIO = 0.02477  # calibrated 2026-05-12
 if "SPY" in prices and "SPYL" not in prices:
     prices["SPYL"] = prices["SPY"] * SPYL_RATIO
     print(f"  SPYL: synthesized from SPY × {SPYL_RATIO} → ${prices['SPYL'].iloc[-1]:.2f}")
+
+# ── USD/PHP FX RATE — for Total Holdings dashboard dual-currency toggle ──────
+# Twelve Data supports USD/PHP forex pair directly on free tier.
+# Used by the Total Holdings tab to convert PHP-denominated assets to USD
+# (and vice versa via the toggle button).
+FX_FALLBACK = 58.00  # used if Twelve Data fails — rough May 2026 spot rate
+USDPHP_RATE = td_quote("USD/PHP")
+if USDPHP_RATE and USDPHP_RATE > 30 and USDPHP_RATE < 100:
+    print(f"  ✓ USD/PHP: Twelve Data live → ₱{USDPHP_RATE:.4f}/$")
+else:
+    USDPHP_RATE = FX_FALLBACK
+    print(f"  ⚠ USD/PHP: Twelve Data failed, using fallback ₱{USDPHP_RATE}/$")
 
 # ── MAG6 basket — conviction-weighted per strategy ────────────────────────────
 components = []
@@ -1353,6 +1630,168 @@ next_manila   = (now_manila + timedelta(days=1)).replace(hour=14, minute=0, seco
 fetched_at    = now_manila.strftime("%b %d, %Y %H:%M PHT")
 next_refresh  = next_manila.strftime("%b %d, %Y 14:00 PHT")
 
+# ── LOAD CASHFLOW DATA (Google Sheets, with cashflow.json fallback) ──────────
+# Called AFTER fetched_at is set (used in meta). Defined earlier near _load_holdings.
+CASHFLOW_DATA, CASHFLOW_META = _load_cashflow()
+
+# ─────────────────────────────────────────────────────────────────────────────
+# BALANCE SHEET COMPUTATION (Total Holdings tab — Phase 1)
+# ─────────────────────────────────────────────────────────────────────────────
+# Build a structured balance sheet combining:
+#   - Investment accounts (from holdings.json × live prices, computed earlier)
+#   - Real estate, vehicles, business equity, other investments, cash, liabilities
+#     (from cashflow.json)
+#
+# All values stored in USD natively. PHP cash accounts are converted using
+# the live USD/PHP rate (USDPHP_RATE fetched above). The dashboard's JS
+# layer handles the PHP/USD toggle by converting display values on the fly.
+
+def _build_balance_sheet():
+    """Construct the balance sheet data structure for the Total Holdings tab."""
+    bs = CASHFLOW_DATA.get("balance_sheet", {})
+    sections = []
+
+    # ── Section 1: Real Estate (from cashflow.json) ──
+    re_items = []
+    re_total = 0.0
+    for item in bs.get("real_estate", []):
+        v = float(item.get("value_usd", 0))
+        re_items.append({"label": item["label"], "value_usd": v, "note": item.get("_note", "")})
+        re_total += v
+    sections.append({"id": "real_estate", "label": "Real Estate",
+                     "items": re_items, "total_usd": re_total})
+
+    # ── Section 2: Investment Accounts — ACTIVE (auto-sync from holdings.json) ──
+    active_items = []
+    active_total = 0.0
+    for acct in ACTIVE_ACCOUNTS:
+        positions = HOLDINGS.get(acct, {})
+        acct_value = 0.0
+        for ticker, pos in positions.items():
+            if ticker == "CASH":
+                acct_value += float(pos)
+            elif isinstance(pos, dict):
+                shares = float(pos.get("shares", 0))
+                # Use live price if available, else fall back to avg cost
+                live = _holding_price(ticker)
+                price = live if live and live > 0 else float(pos.get("avg_cost", 0))
+                acct_value += shares * price
+        if acct_value > 0:
+            active_items.append({"label": ACCOUNT_LABELS.get(acct, acct),
+                                 "value_usd": acct_value,
+                                 "note": "Active strategy universe"})
+            active_total += acct_value
+    sections.append({"id": "investments_active",
+                     "label": "Investment Accounts — Active",
+                     "items": active_items, "total_usd": active_total})
+
+    # ── Section 3: Investment Accounts — LEGACY (auto-sync) ──
+    legacy_items = []
+    legacy_total = 0.0
+    for acct in LEGACY_ACCOUNTS:
+        positions = HOLDINGS.get(acct, {})
+        acct_value = 0.0
+        for ticker, pos in positions.items():
+            if ticker == "CASH":
+                acct_value += float(pos)
+            elif isinstance(pos, dict):
+                shares = float(pos.get("shares", 0))
+                live = _holding_price(ticker)
+                price = live if live and live > 0 else float(pos.get("avg_cost", 0))
+                acct_value += shares * price
+        if acct_value > 0:
+            legacy_items.append({"label": ACCOUNT_LABELS.get(acct, acct),
+                                 "value_usd": acct_value,
+                                 "note": "Frozen / hold indefinitely"})
+            legacy_total += acct_value
+    sections.append({"id": "investments_legacy",
+                     "label": "Investment Accounts — Legacy",
+                     "items": legacy_items, "total_usd": legacy_total})
+
+    # ── Section 4: Other Investments (from cashflow.json — not in matrix) ──
+    other_items = []
+    other_total = 0.0
+    for item in bs.get("other_investments", []):
+        v = float(item.get("value_usd", 0))
+        other_items.append({"label": item["label"], "value_usd": v, "note": item.get("_note", "")})
+        other_total += v
+    sections.append({"id": "investments_other",
+                     "label": "Other Investments",
+                     "items": other_items, "total_usd": other_total})
+
+    # ── Section 5: Vehicles ──
+    veh_items = []
+    veh_total = 0.0
+    for item in bs.get("vehicles", []):
+        v = float(item.get("value_usd", 0))
+        veh_items.append({"label": item["label"], "value_usd": v, "note": item.get("_note", "")})
+        veh_total += v
+    sections.append({"id": "vehicles", "label": "Vehicles",
+                     "items": veh_items, "total_usd": veh_total})
+
+    # ── Section 6: Business Equity ──
+    biz_items = []
+    biz_total = 0.0
+    for item in bs.get("business_equity", []):
+        v = float(item.get("value_usd", 0))
+        biz_items.append({"label": item["label"], "value_usd": v, "note": item.get("_note", "")})
+        biz_total += v
+    sections.append({"id": "business_equity", "label": "Business Equity",
+                     "items": biz_items, "total_usd": biz_total})
+
+    # ── Section 7: Cash Accounts (mixed USD + PHP, normalized to USD) ──
+    cash_items = []
+    cash_total = 0.0
+    for item in bs.get("cash_accounts", []):
+        ccy = item.get("currency", "USD").upper()
+        raw_val = float(item.get("value", 0))
+        if ccy == "PHP":
+            usd_val = raw_val / USDPHP_RATE
+        else:
+            usd_val = raw_val
+        cash_items.append({"label": item["label"],
+                           "value_usd": usd_val,
+                           "currency": ccy,
+                           "native_value": raw_val,
+                           "note": ""})
+        cash_total += usd_val
+    sections.append({"id": "cash_accounts", "label": "Cash Accounts",
+                     "items": cash_items, "total_usd": cash_total})
+
+    # ── Liabilities (separate from assets) ──
+    liab_items = []
+    liab_total = 0.0
+    for item in bs.get("liabilities", []):
+        bal = float(item.get("balance_usd", 0))
+        limit = float(item.get("limit_usd", 0))
+        liab_items.append({"label": item["label"], "value_usd": bal,
+                           "limit_usd": limit, "note": item.get("_note", "")})
+        liab_total += bal
+
+    total_assets = sum(s["total_usd"] for s in sections)
+    net_worth = total_assets - liab_total
+
+    return {
+        "asset_sections": sections,
+        "liabilities": {"items": liab_items, "total_usd": liab_total},
+        "totals": {
+            "assets_usd": total_assets,
+            "liabilities_usd": liab_total,
+            "net_worth_usd": net_worth,
+        },
+        "fx": {
+            "usdphp_rate": USDPHP_RATE,
+        },
+    }
+
+balance_sheet = _build_balance_sheet()
+
+print(f"\n── Balance Sheet Snapshot ──")
+print(f"  Total Assets     : ${balance_sheet['totals']['assets_usd']:>14,.0f}")
+print(f"  Total Liabilities: ${balance_sheet['totals']['liabilities_usd']:>14,.0f}")
+print(f"  NET WORTH        : ${balance_sheet['totals']['net_worth_usd']:>14,.0f}")
+print(f"  FX rate (PHP/USD): ₱{USDPHP_RATE:.4f}")
+
 # ── JSON PAYLOAD ──────────────────────────────────────────────────────────────
 payload = json.dumps({
     "horizons":     all_data,
@@ -1365,6 +1804,7 @@ payload = json.dumps({
     "active_capital": active_capital,
     "plain_cash":   plain_cash_ibkr,
     "monthly_input": 12820,
+    "balance_sheet": balance_sheet,
     "fetched_at":   fetched_at,
 }, separators=(",",":"))
 
@@ -1544,6 +1984,54 @@ zone_chip_html = f"""
       <div class="zone-alloc-chip"><span>{z_chip['SPACEX']*100:.0f}%</span><small>SpaceX</small></div>
       <div class="zone-alloc-chip"><span>{z_chip['ANTHROPIC']*100:.0f}%</span><small>Anthropic</small></div>
       <div class="zone-alloc-chip"><span>{z_chip['CASH']*100:.0f}%</span><small>SGOV Cash</small></div>"""
+
+# ── Balance Sheet HTML rows (Total Holdings tab) ──
+# Build section headers + line item rows.
+# Each value cell gets a data-usd attribute so JS can re-render in PHP on toggle.
+_total_assets = balance_sheet["totals"]["assets_usd"]
+bs_assets_html = ""
+for section in balance_sheet["asset_sections"]:
+    sec_pct = (section["total_usd"] / _total_assets * 100) if _total_assets > 0 else 0
+    # Section header row
+    bs_assets_html += f"""
+        <tr class="bs-section-row">
+          <td><strong>{section['label']}</strong></td>
+          <td class="bs-num"><strong data-usd="{section['total_usd']:.2f}">${section['total_usd']:,.0f}</strong></td>
+          <td class="bs-num"><strong>{sec_pct:.1f}%</strong></td>
+          <td></td>
+        </tr>"""
+    # Line items
+    for it in section["items"]:
+        note = it.get("note", "")
+        native_info = ""
+        if it.get("currency") == "PHP":
+            native_info = f" <span class='bs-native'>(₱{it['native_value']:,.0f} native)</span>"
+        bs_assets_html += f"""
+        <tr class="bs-item-row">
+          <td><span class="bs-tree">├─</span> {it['label']}{native_info}</td>
+          <td class="bs-num" data-usd="{it['value_usd']:.2f}">${it['value_usd']:,.0f}</td>
+          <td class="bs-num bs-mut">—</td>
+          <td class="bs-note">{note}</td>
+        </tr>"""
+
+# Liabilities rows
+bs_liab_html = ""
+liab_items = balance_sheet["liabilities"]["items"]
+if not liab_items:
+    bs_liab_html = """
+        <tr class="bs-item-row">
+          <td colspan="4" style="text-align:center;color:var(--mut);font-style:italic">No liabilities tracked</td>
+        </tr>"""
+else:
+    for it in liab_items:
+        bs_liab_html += f"""
+        <tr class="bs-item-row">
+          <td>{it['label']}</td>
+          <td class="bs-num" data-usd="{it['value_usd']:.2f}">${it['value_usd']:,.0f}</td>
+          <td class="bs-num bs-mut" data-usd="{it['limit_usd']:.2f}">${it['limit_usd']:,.0f}</td>
+          <td class="bs-note">{it.get('note', '')}</td>
+        </tr>"""
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # HTML STRING
@@ -1731,6 +2219,78 @@ html,body{{background:var(--bg);color:var(--txt);font-family:'DM Mono',monospace
 hr{{border:none;border-top:.5px solid var(--bdr);margin:24px 0 12px}}
 .footer{{font-size:9px;color:var(--mut);line-height:2;text-align:center}}
 
+/* ═══════════════════════════════════════════════════════════════════════════
+   TAB NAVIGATION — Investment Dashboard | Total Holdings
+   ═══════════════════════════════════════════════════════════════════════════ */
+.main-tabs{{display:flex;gap:0;border-bottom:1.5px solid var(--bdr2);margin:18px 0 20px;padding:0}}
+.main-tab{{background:transparent;border:none;padding:11px 22px;font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:600;color:var(--mut);cursor:pointer;letter-spacing:.04em;text-transform:uppercase;border-bottom:2.5px solid transparent;margin-bottom:-1.5px;transition:all .15s ease}}
+.main-tab:hover{{color:var(--txt)}}
+.main-tab.active{{color:var(--txt);border-bottom-color:var(--zone)}}
+.tab-content{{display:none}}
+.tab-content.active{{display:block}}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   TOTAL HOLDINGS TAB — Phase 1: Balance Sheet
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* Header row: FX info + currency toggle */
+.bs-header-row{{display:flex;justify-content:space-between;align-items:center;margin-bottom:24px;padding:14px 18px;background:var(--surf2);border:.5px solid var(--bdr);border-radius:6px}}
+.bs-fx-info{{display:flex;align-items:center;gap:10px;font-size:11px}}
+.bs-fx-label{{color:var(--mut);letter-spacing:.04em;text-transform:uppercase;font-size:9px}}
+.bs-fx-rate{{font-weight:700;color:var(--txt);font-size:13px}}
+.bs-fx-source{{font-size:9px;color:var(--mut);font-style:italic}}
+.bs-currency-toggle{{display:flex;gap:0;background:var(--bg);border:.5px solid var(--bdr);border-radius:4px;padding:2px}}
+.bs-ccy-btn{{background:transparent;border:none;padding:6px 14px;font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:600;color:var(--mut);cursor:pointer;border-radius:3px;transition:all .15s}}
+.bs-ccy-btn:hover{{color:var(--txt)}}
+.bs-ccy-btn.active{{background:var(--txt);color:var(--bg)}}
+
+/* Net worth headline cards */
+.bs-headline{{display:flex;align-items:center;gap:14px;margin-bottom:28px}}
+.bs-headline-card{{flex:1;padding:18px 20px;background:var(--surf);border:.5px solid var(--bdr);border-radius:6px}}
+.bs-headline-card.bs-networth{{background:linear-gradient(180deg, var(--surf) 0%, var(--surf2) 100%);border-color:var(--zone);border-width:1px}}
+.bs-headline-label{{font-size:9px;letter-spacing:.12em;text-transform:uppercase;color:var(--mut);margin-bottom:8px}}
+.bs-headline-value{{font-family:'Syne',sans-serif;font-size:26px;font-weight:700;color:var(--txt);letter-spacing:-.01em}}
+.bs-networth .bs-headline-value{{color:var(--zone)}}
+.bs-headline-op{{font-size:24px;font-weight:300;color:var(--mut);font-family:'Syne',sans-serif}}
+
+/* Balance sheet section */
+.bs-section{{margin-bottom:28px}}
+
+/* Balance sheet table */
+.bs-table{{width:100%;border-collapse:collapse;font-size:11px}}
+.bs-table th{{text-align:left;padding:9px 10px;font-weight:600;color:var(--mut);font-size:9px;letter-spacing:.08em;text-transform:uppercase;border-bottom:1px solid var(--bdr2);background:var(--surf2)}}
+.bs-table th.bs-num{{text-align:right}}
+.bs-table td{{padding:8px 10px;border-bottom:.5px solid var(--bdr)}}
+.bs-table td.bs-num{{text-align:right;font-variant-numeric:tabular-nums;font-feature-settings:"tnum" 1}}
+.bs-mut{{color:var(--mut)}}
+.bs-note{{font-size:10px;color:var(--mut);font-style:italic}}
+.bs-note-col{{max-width:280px}}
+
+/* Section header rows (Real Estate, Investments — Active, etc.) */
+.bs-section-row{{background:var(--surf2);border-top:1px solid var(--bdr2)}}
+.bs-section-row td{{padding:11px 10px;font-size:11.5px;color:var(--txt)}}
+
+/* Line item rows (indented) */
+.bs-item-row td:first-child{{padding-left:24px;font-size:10.5px;color:var(--txt)}}
+.bs-tree{{color:var(--mut);font-family:monospace;margin-right:4px;font-size:9px}}
+.bs-native{{font-size:9px;color:var(--mut);font-style:italic;margin-left:6px}}
+
+/* Grand total footer row */
+.bs-grand-total{{background:var(--surf2);border-top:1.5px solid var(--bdr2);font-weight:700}}
+.bs-grand-total td{{padding:12px 10px;font-size:12px}}
+
+/* Footnote */
+.bs-footnote{{margin-top:20px;padding:12px 14px;background:var(--surf2);border:.5px solid var(--bdr);border-radius:4px;font-size:10px;color:var(--mut);line-height:1.6}}
+.bs-footnote code{{background:var(--bg);padding:1px 5px;border-radius:2px;font-family:'JetBrains Mono',monospace;font-size:9.5px;color:var(--txt)}}
+
+@media(max-width:780px){{
+  .bs-headline{{flex-direction:column;gap:6px}}
+  .bs-headline-op{{display:none}}
+  .bs-table th:nth-child(3),.bs-table td:nth-child(3){{display:none}}
+  .bs-note-col{{display:none}}
+  .bs-table th:nth-child(4),.bs-table td:nth-child(4){{display:none}}
+}}
+
 @media(max-width:700px){{
   .cards{{grid-template-columns:1fr}}
   .tab,.yc-tab{{padding:6px 10px;font-size:9px}}
@@ -1739,6 +2299,7 @@ hr{{border:none;border-top:.5px solid var(--bdr);margin:24px 0 12px}}
   .alloc-table th:nth-child(4),.alloc-table td:nth-child(4),
   .alloc-table th:nth-child(6),.alloc-table td:nth-child(6),
   .alloc-table th:nth-child(8),.alloc-table td:nth-child(8){{display:none}}
+  .main-tab{{padding:9px 14px;font-size:10.5px}}
 }}
 </style>
 </head>
@@ -1760,6 +2321,19 @@ hr{{border:none;border-top:.5px solid var(--bdr);margin:24px 0 12px}}
     <span class="src-dot"></span>
     <span>Refreshed: {fetched_at} · Next: {next_refresh} · Twelve Data + FRED</span>
   </div>
+
+  <!-- ─────────────────────────────────────────────────────────────── -->
+  <!-- TAB NAVIGATION — Investment Dashboard | Total Holdings          -->
+  <!-- ─────────────────────────────────────────────────────────────── -->
+  <div class="main-tabs">
+    <button class="main-tab active" data-tab="investment" onclick="switchMainTab('investment')">Investment Dashboard</button>
+    <button class="main-tab" data-tab="holdings" onclick="switchMainTab('holdings')">Total Holdings</button>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <!-- TAB 1: INVESTMENT DASHBOARD (existing content)                  -->
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <div id="tab-investment" class="tab-content active">
 
   <!-- ZONE BANNER -->
   <div class="zone-banner">
@@ -1954,6 +2528,108 @@ hr{{border:none;border-top:.5px solid var(--bdr);margin:24px 0 12px}}
     </div>
   </div>
 
+  </div> <!-- end #tab-investment -->
+
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <!-- TAB 2: TOTAL HOLDINGS (Phase 1: Balance Sheet)                  -->
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <div id="tab-holdings" class="tab-content">
+
+    <!-- Currency toggle + FX badge -->
+    <div class="bs-header-row">
+      <div class="bs-fx-info">
+        <span class="bs-fx-label">FX Rate:</span>
+        <span class="bs-fx-rate">₱{USDPHP_RATE:.4f} / $1</span>
+        <span class="bs-fx-source">Twelve Data live</span>
+      </div>
+      <div class="bs-currency-toggle">
+        <button class="bs-ccy-btn active" data-ccy="USD" onclick="switchCurrency('USD')">USD ($)</button>
+        <button class="bs-ccy-btn" data-ccy="PHP" onclick="switchCurrency('PHP')">PHP (₱)</button>
+      </div>
+    </div>
+
+    <!-- Net Worth Headline -->
+    <div class="bs-headline">
+      <div class="bs-headline-card bs-assets">
+        <div class="bs-headline-label">TOTAL ASSETS</div>
+        <div class="bs-headline-value" data-usd="{balance_sheet['totals']['assets_usd']:.2f}">${balance_sheet['totals']['assets_usd']:,.0f}</div>
+      </div>
+      <div class="bs-headline-op">−</div>
+      <div class="bs-headline-card bs-liab">
+        <div class="bs-headline-label">TOTAL LIABILITIES</div>
+        <div class="bs-headline-value" data-usd="{balance_sheet['totals']['liabilities_usd']:.2f}">${balance_sheet['totals']['liabilities_usd']:,.0f}</div>
+      </div>
+      <div class="bs-headline-op">=</div>
+      <div class="bs-headline-card bs-networth">
+        <div class="bs-headline-label">NET WORTH</div>
+        <div class="bs-headline-value" data-usd="{balance_sheet['totals']['net_worth_usd']:.2f}">${balance_sheet['totals']['net_worth_usd']:,.0f}</div>
+      </div>
+    </div>
+
+    <!-- Asset Sections -->
+    <div class="bs-section">
+      <div class="section-hd">
+        <span>ASSETS · BY CATEGORY</span>
+        <span style="font-size:9px;color:var(--mut)">Auto-synced from holdings.json + cashflow.json</span>
+      </div>
+      <table class="bs-table">
+        <thead>
+          <tr>
+            <th>Category / Line Item</th>
+            <th class="bs-num">Value</th>
+            <th class="bs-num">% of Assets</th>
+            <th class="bs-note-col">Notes</th>
+          </tr>
+        </thead>
+        <tbody id="bsAssetsBody">{bs_assets_html}
+        </tbody>
+        <tfoot>
+          <tr class="bs-grand-total">
+            <td><strong>TOTAL ASSETS</strong></td>
+            <td class="bs-num"><strong data-usd="{balance_sheet['totals']['assets_usd']:.2f}">${balance_sheet['totals']['assets_usd']:,.0f}</strong></td>
+            <td class="bs-num"><strong>100.0%</strong></td>
+            <td></td>
+          </tr>
+        </tfoot>
+      </table>
+    </div>
+
+    <!-- Liabilities Section -->
+    <div class="bs-section">
+      <div class="section-hd">
+        <span>LIABILITIES</span>
+        <span style="font-size:9px;color:var(--mut)">Credit card balances + other debts</span>
+      </div>
+      <table class="bs-table">
+        <thead>
+          <tr>
+            <th>Line Item</th>
+            <th class="bs-num">Balance Owed</th>
+            <th class="bs-num">Credit Limit</th>
+            <th class="bs-note-col">Notes</th>
+          </tr>
+        </thead>
+        <tbody id="bsLiabBody">{bs_liab_html}
+        </tbody>
+        <tfoot>
+          <tr class="bs-grand-total">
+            <td><strong>TOTAL LIABILITIES</strong></td>
+            <td class="bs-num"><strong data-usd="{balance_sheet['totals']['liabilities_usd']:.2f}">${balance_sheet['totals']['liabilities_usd']:,.0f}</strong></td>
+            <td class="bs-num">—</td>
+            <td></td>
+          </tr>
+        </tfoot>
+      </table>
+    </div>
+
+    <div class="bs-footnote">
+      Phase 1 of Total Holdings dashboard — Balance Sheet only. Cashflow (income/expenses) and 15-year projection coming in Phase 2 and Phase 3.
+      Investment accounts auto-sync from <code>holdings.json</code> × live prices. Other categories edited in <code>cashflow.json</code>.
+      PHP values converted at live USD/PHP rate from Twelve Data.
+    </div>
+
+  </div> <!-- end #tab-holdings -->
+
   <hr/>
   <div class="footer">
     Investment Dashboard · Twelve Data + FRED · Mag6: {mag6_footer}<br>
@@ -1972,9 +2648,68 @@ const NAMES  = {{SPYL:'SPYL Anchor',MAG6:'Mag6 Alpha',PORTFOLIO:'My Portfolio'}}
 const ZONE_COLOR = '{zone_color}';
 const ZONE_BOUNDARIES = {json.dumps(ZONE_BOUNDARIES)};
 const ACTIVE_CAPITAL = {active_capital};
+const FX_USDPHP = {USDPHP_RATE};
 
 let curTab='7D', curYCTab='5Y', useLog=false;
 let chartInst=null, ycInst=null;
+let curCurrency = 'USD';   // toggle state for Total Holdings tab
+
+// ── MAIN TAB SWITCHING — Investment Dashboard | Total Holdings ──────────────
+function switchMainTab(tabId){{
+  document.querySelectorAll('.main-tab').forEach(b => {{
+    b.classList.toggle('active', b.dataset.tab === tabId);
+  }});
+  document.querySelectorAll('.tab-content').forEach(div => {{
+    div.classList.toggle('active', div.id === 'tab-' + tabId);
+  }});
+  // Persist tab preference
+  try {{ localStorage.setItem('dashboard_tab', tabId); }} catch(e) {{}}
+  // Charts in the Investment tab need a redraw when their container becomes visible
+  if(tabId === 'investment' && chartInst){{
+    setTimeout(() => {{ try{{ chartInst.update(); ycInst && ycInst.update(); }} catch(e){{}} }}, 50);
+  }}
+}}
+
+// Restore last selected tab from localStorage on page load
+function restoreTab(){{
+  try {{
+    const saved = localStorage.getItem('dashboard_tab');
+    if(saved === 'holdings') switchMainTab('holdings');
+  }} catch(e) {{}}
+}}
+
+// ── CURRENCY TOGGLE — USD ↔ PHP for Total Holdings tab ──────────────────────
+function fmtCurrency(amountUsd, ccy){{
+  if(ccy === 'PHP'){{
+    const php = amountUsd * FX_USDPHP;
+    // Round to nearest peso for display
+    return '₱' + Math.round(php).toLocaleString();
+  }}
+  return '$' + Math.round(amountUsd).toLocaleString();
+}}
+
+function switchCurrency(ccy){{
+  curCurrency = ccy;
+  // Update button states
+  document.querySelectorAll('.bs-ccy-btn').forEach(b => {{
+    b.classList.toggle('active', b.dataset.ccy === ccy);
+  }});
+  // Re-render every element with data-usd attribute
+  document.querySelectorAll('[data-usd]').forEach(el => {{
+    const usd = parseFloat(el.getAttribute('data-usd'));
+    if(!isNaN(usd)) el.textContent = fmtCurrency(usd, ccy);
+  }});
+  // Persist preference
+  try {{ localStorage.setItem('dashboard_ccy', ccy); }} catch(e) {{}}
+}}
+
+// Restore last currency preference
+function restoreCurrency(){{
+  try {{
+    const saved = localStorage.getItem('dashboard_ccy');
+    if(saved === 'PHP') switchCurrency('PHP');
+  }} catch(e) {{}}
+}}
 
 // ── YIELD CURVE CHART ───────────────────────────────────────────────────────
 function setYCTab(h){{
@@ -2281,6 +3016,8 @@ function render(){{
 renderYC();
 render();
 renderAllocTable();
+restoreTab();
+restoreCurrency();
 </script>
 </body>
 </html>"""
