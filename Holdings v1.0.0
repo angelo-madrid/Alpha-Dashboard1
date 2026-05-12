@@ -1,21 +1,21 @@
 {
   "_meta": {
     "schema_version": "1.0",
-    "last_updated": "2026-05-10",
-    "last_trade_notes": "Initial extract from generate_dashboard.py v3.0.6. No trades yet on new strategy.",
-    "_instructions": "Edit this file in GitHub web UI after each trade. Update share counts and avg_cost. Use weighted-average formula: new_avg = (old_shares * old_cost + new_shares * fill_price) / (old_shares + new_shares). CASH is a plain number (no shares/avg_cost). After committing, dashboard auto-refreshes on next cron or manual trigger."
+    "last_updated": "2026-05-12",
+    "last_trade_notes": "v3 strategy deployment complete: MSFT 25→45, NVDA 50→110, SPYL 2065→3158, opened SGOV 45sh. Cash drained to $340."
   },
 
   "accounts": {
     "IBKR": {
       "classification": "ACTIVE",
       "label": "IBKR",
-      "META": {"shares": 18,   "avg_cost": 612.04},
-      "MSFT": {"shares": 25,   "avg_cost": 419.18},
-      "NVDA": {"shares": 50,   "avg_cost": 202.57},
-      "SPYL": {"shares": 2065, "avg_cost": 17.72},
-      "VOO":  {"shares": 28,   "avg_cost": 605.89},
-      "CASH": 31144.43
+      "META": {"shares": 18,    "avg_cost": 612.04},
+      "MSFT": {"shares": 45,    "avg_cost": 415.42},
+      "NVDA": {"shares": 110,   "avg_cost": 209.55},
+      "SGOV": {"shares": 45,    "avg_cost": 100.51},
+      "SPYL": {"shares": 3158,  "avg_cost": 17.90},
+      "VOO":  {"shares": 28,    "avg_cost": 605.89},
+      "CASH": 340.02
     },
 
     "CITI_401K": {
