@@ -1,11 +1,31 @@
 # ═════════════════════════════════════════════════════════════════════════════
 # ALPHA DASHBOARD — generate_dashboard.py
 # ═════════════════════════════════════════════════════════════════════════════
-#   VERSION   : 3.2.0
+#   VERSION   : 3.2.2
 #   DATE      : 2026-05-12
 #   PAIRS WITH: refresh.yml v3.0.8+, holdings.json v1.0+, Google Sheets (4 tabs)
 #   STRATEGY  : Bogle/Buffett anchored, Mag6-dominant, Active vs Legacy split
 #   CHANGELOG :
+#     3.2.2 — FX rate sourced from Google Sheet (May 12):
+#             • Settings tab `usdphp_rate` key (GOOGLEFINANCE formula) is now
+#                the primary source for USD/PHP conversions.
+#             • Twelve Data remains as fallback; hardcoded ₱61 as last resort.
+#             • Dashboard footer shows actual FX source (Google Finance vs
+#                Twelve Data vs fallback) for transparency.
+#             • Hardcoded fallback bumped from ₱58 → ₱61 (closer to May 2026 spot).
+#     3.2.1 — Balance Sheet expansion + PHP currency bug fix (May 12):
+#             • Added esel_investments category to _parse_balance_sheet_rows
+#                and _build_balance_sheet — renders as "Esel — Investments" section.
+#             • CRITICAL FIX: real_estate, vehicles, business_equity, and
+#                other_investments now properly convert PHP→USD using live
+#                USDPHP_RATE. Previously these sections treated raw PHP values
+#                as USD, massively overstating net worth (e.g. ₱30M condo read
+#                as $30M USD instead of ~$517K).
+#             • Standard parser schema now stores `currency` field on every
+#                row (not just cash/liabilities) so downstream conversions work.
+#             • Fixed PHP liability limit parser: now strips ₱ symbol and converts
+#                PHP limits to USD using live USDPHP_RATE before storing.
+#             • Liabilities balance also normalized to USD when currency=PHP.
 #     3.2.0 — Google Sheets data source for cashflow data (May 12):
 #             • cashflow.json deprecated as primary source — Google Sheets
 #                is now the source of truth for balance sheet, cashflow,
@@ -133,7 +153,7 @@
 #     2.3.3 — Pre-populated FV_OVERLAY with May 2026 consensus.
 #     2.3.0 — Twelve Data + FRED migration.
 # ═════════════════════════════════════════════════════════════════════════════
-SCRIPT_VERSION = "3.2.0"
+SCRIPT_VERSION = "3.2.2"
 SCRIPT_DATE    = "2026-05-12"
 
 """
@@ -526,7 +546,8 @@ def _parse_balance_sheet_rows(rows):
     Sheet columns: Category, Subcategory, Label, Value, Currency, Notes"""
     bs = {
         "real_estate": [], "vehicles": [], "business_equity": [],
-        "other_investments": [], "cash_accounts": [], "liabilities": [],
+        "other_investments": [], "esel_investments": [],
+        "cash_accounts": [], "liabilities": [],
     }
     for row in rows:
         cat = (row.get("Category") or "").strip().lower()
@@ -551,29 +572,36 @@ def _parse_balance_sheet_rows(rows):
                 "_note": note,
             })
         elif cat == "liabilities":
-            # Liabilities use balance_usd + limit_usd schema.
-            # Sheet provides Value=balance, limit comes from Notes field.
+            # Liabilities: balance + limit, both normalized to USD.
+            # Limit extracted from Notes field — handles $ (USD) and ₱ (PHP).
             limit = 0.0
             if "limit:" in note.lower():
                 try:
-                    limit_str = note.lower().split("limit:")[-1].replace("$", "").replace(",", "").strip()
-                    # Extract just the number
+                    limit_str = note.lower().split("limit:")[-1].strip()
+                    limit_is_php = ("₱" in limit_str or ccy == "PHP")
+                    limit_str = limit_str.replace("$","").replace("₱","").replace(",","").strip()
                     import re as _re
                     m = _re.search(r"[\d.]+", limit_str)
-                    if m: limit = float(m.group())
+                    if m:
+                        limit_native = float(m.group())
+                        limit = limit_native / USDPHP_RATE if limit_is_php else limit_native
                 except Exception:
                     limit = 0.0
+            bal_usd = value / USDPHP_RATE if ccy == "PHP" else value
             bs[cat].append({
                 "label": label,
-                "balance_usd": value,
+                "balance_usd": bal_usd,
                 "limit_usd": limit,
+                "currency": ccy,
                 "_note": note,
             })
         else:
-            # Standard schema: {label, value_usd, _note}
+            # Standard schema: {label, value_usd, currency, _note}
+            # `currency` enables PHP→USD conversion downstream (esel_investments uses this).
             bs[cat].append({
                 "label": label,
                 "value_usd": value,
+                "currency": ccy,
                 "_note": note,
             })
     return bs
@@ -885,16 +913,19 @@ if "SPY" in prices and "SPYL" not in prices:
     print(f"  SPYL: synthesized from SPY × {SPYL_RATIO} → ${prices['SPYL'].iloc[-1]:.2f}")
 
 # ── USD/PHP FX RATE — for Total Holdings dashboard dual-currency toggle ──────
-# Twelve Data supports USD/PHP forex pair directly on free tier.
-# Used by the Total Holdings tab to convert PHP-denominated assets to USD
-# (and vice versa via the toggle button).
-FX_FALLBACK = 58.00  # used if Twelve Data fails — rough May 2026 spot rate
+# Priority order:
+#   1. Google Sheets Settings tab `usdphp_rate` key (preferred — uses GOOGLEFINANCE)
+#   2. Twelve Data forex endpoint (fallback)
+#   3. Hardcoded ₱61 fallback (last resort)
+# Sheet override is applied AFTER _load_cashflow() runs, before _build_balance_sheet().
+FX_FALLBACK = 61.00  # rough May 2026 spot rate; only used if both Sheet and TD fail
 USDPHP_RATE = td_quote("USD/PHP")
 if USDPHP_RATE and USDPHP_RATE > 30 and USDPHP_RATE < 100:
-    print(f"  ✓ USD/PHP: Twelve Data live → ₱{USDPHP_RATE:.4f}/$")
+    print(f"  ✓ USD/PHP: Twelve Data live → ₱{USDPHP_RATE:.4f}/$ (may be overridden by Sheet)")
 else:
     USDPHP_RATE = FX_FALLBACK
-    print(f"  ⚠ USD/PHP: Twelve Data failed, using fallback ₱{USDPHP_RATE}/$")
+    print(f"  ⚠ USD/PHP: Twelve Data failed, using fallback ₱{USDPHP_RATE}/$ (may be overridden by Sheet)")
+FX_SOURCE = "twelve_data"  # tracks where the rate came from for the dashboard footer
 
 # ── MAG6 basket — conviction-weighted per strategy ────────────────────────────
 components = []
@@ -1634,6 +1665,24 @@ next_refresh  = next_manila.strftime("%b %d, %Y 14:00 PHT")
 # Called AFTER fetched_at is set (used in meta). Defined earlier near _load_holdings.
 CASHFLOW_DATA, CASHFLOW_META = _load_cashflow()
 
+# ── OVERRIDE USDPHP_RATE FROM SHEET SETTINGS (preferred source) ──────────────
+# The Settings tab has a `usdphp_rate` key driven by GOOGLEFINANCE("CURRENCY:USDPHP").
+# This is the user's preferred source — overrides the Twelve Data fetch above
+# if the Sheet has a valid rate (sanity-checked to 30 < rate < 100).
+_sheet_settings = CASHFLOW_DATA.get("settings", {})
+_sheet_fx = _sheet_settings.get("usdphp_rate")
+if _sheet_fx is not None:
+    try:
+        _sheet_fx_val = float(_sheet_fx)
+        if 30 < _sheet_fx_val < 100:
+            USDPHP_RATE = _sheet_fx_val
+            FX_SOURCE = "google_sheets"
+            print(f"  ✓ USD/PHP: Sheet override → ₱{USDPHP_RATE:.4f}/$ (Google Finance)")
+        else:
+            print(f"  ⚠ USD/PHP: Sheet value {_sheet_fx_val} out of range — keeping previous ₱{USDPHP_RATE:.4f}/$")
+    except (ValueError, TypeError):
+        print(f"  ⚠ USD/PHP: Sheet value '{_sheet_fx}' not numeric — keeping previous ₱{USDPHP_RATE:.4f}/$")
+
 # ─────────────────────────────────────────────────────────────────────────────
 # BALANCE SHEET COMPUTATION (Total Holdings tab — Phase 1)
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1651,13 +1700,19 @@ def _build_balance_sheet():
     bs = CASHFLOW_DATA.get("balance_sheet", {})
     sections = []
 
-    # ── Section 1: Real Estate (from cashflow.json) ──
+    # ── Section 1: Real Estate (PHP/USD aware) ──
     re_items = []
     re_total = 0.0
     for item in bs.get("real_estate", []):
-        v = float(item.get("value_usd", 0))
-        re_items.append({"label": item["label"], "value_usd": v, "note": item.get("_note", "")})
-        re_total += v
+        ccy = item.get("currency", "USD").upper()
+        raw_val = float(item.get("value_usd", 0))
+        usd_val = raw_val / USDPHP_RATE if ccy == "PHP" else raw_val
+        re_items.append({
+            "label": item["label"], "value_usd": usd_val,
+            "currency": ccy, "native_value": raw_val,
+            "note": item.get("_note", ""),
+        })
+        re_total += usd_val
     sections.append({"id": "real_estate", "label": "Real Estate",
                      "items": re_items, "total_usd": re_total})
 
@@ -1708,34 +1763,74 @@ def _build_balance_sheet():
                      "label": "Investment Accounts — Legacy",
                      "items": legacy_items, "total_usd": legacy_total})
 
-    # ── Section 4: Other Investments (from cashflow.json — not in matrix) ──
+    # ── Section 4: Other Investments (PHP/USD aware) ──
     other_items = []
     other_total = 0.0
     for item in bs.get("other_investments", []):
-        v = float(item.get("value_usd", 0))
-        other_items.append({"label": item["label"], "value_usd": v, "note": item.get("_note", "")})
-        other_total += v
+        ccy = item.get("currency", "USD").upper()
+        raw_val = float(item.get("value_usd", 0))
+        usd_val = raw_val / USDPHP_RATE if ccy == "PHP" else raw_val
+        other_items.append({
+            "label": item["label"], "value_usd": usd_val,
+            "currency": ccy, "native_value": raw_val,
+            "note": item.get("_note", ""),
+        })
+        other_total += usd_val
     sections.append({"id": "investments_other",
                      "label": "Other Investments",
                      "items": other_items, "total_usd": other_total})
 
-    # ── Section 5: Vehicles ──
+    # ── Section 5: Esel Investments (static values from Sheet — not in matrix) ──
+    esel_items = []
+    esel_total = 0.0
+    for item in bs.get("esel_investments", []):
+        ccy = item.get("currency", "USD").upper()
+        raw_val = float(item.get("value_usd", 0))
+        if ccy == "PHP":
+            usd_val = raw_val / USDPHP_RATE
+        else:
+            usd_val = raw_val
+        esel_items.append({
+            "label": item["label"],
+            "value_usd": usd_val,
+            "currency": ccy,
+            "native_value": raw_val,
+            "note": item.get("_note", ""),
+        })
+        esel_total += usd_val
+    sections.append({"id": "esel_investments",
+                     "label": "Esel — Investments",
+                     "items": esel_items, "total_usd": esel_total})
+
+    # ── Section 6: Vehicles (PHP/USD aware) ──
     veh_items = []
     veh_total = 0.0
     for item in bs.get("vehicles", []):
-        v = float(item.get("value_usd", 0))
-        veh_items.append({"label": item["label"], "value_usd": v, "note": item.get("_note", "")})
-        veh_total += v
+        ccy = item.get("currency", "USD").upper()
+        raw_val = float(item.get("value_usd", 0))
+        usd_val = raw_val / USDPHP_RATE if ccy == "PHP" else raw_val
+        veh_items.append({
+            "label": item["label"], "value_usd": usd_val,
+            "currency": ccy, "native_value": raw_val,
+            "note": item.get("_note", ""),
+        })
+        veh_total += usd_val
     sections.append({"id": "vehicles", "label": "Vehicles",
                      "items": veh_items, "total_usd": veh_total})
 
-    # ── Section 6: Business Equity ──
+    # ── Section 7: Business Equity (PHP/USD aware) ──
     biz_items = []
     biz_total = 0.0
     for item in bs.get("business_equity", []):
-        v = float(item.get("value_usd", 0))
-        biz_items.append({"label": item["label"], "value_usd": v, "note": item.get("_note", "")})
-        biz_total += v
+        ccy = item.get("currency", "USD").upper()
+        raw_val = float(item.get("value_usd", 0))
+        usd_val = raw_val / USDPHP_RATE if ccy == "PHP" else raw_val
+        biz_items.append({
+            "label": item["label"], "value_usd": usd_val,
+            "currency": ccy, "native_value": raw_val,
+            "note": item.get("_note", ""),
+        })
+        biz_total += usd_val
     sections.append({"id": "business_equity", "label": "Business Equity",
                      "items": biz_items, "total_usd": biz_total})
 
@@ -2540,7 +2635,7 @@ hr{{border:none;border-top:.5px solid var(--bdr);margin:24px 0 12px}}
       <div class="bs-fx-info">
         <span class="bs-fx-label">FX Rate:</span>
         <span class="bs-fx-rate">₱{USDPHP_RATE:.4f} / $1</span>
-        <span class="bs-fx-source">Twelve Data live</span>
+        <span class="bs-fx-source">{'Google Finance (Sheet)' if FX_SOURCE == 'google_sheets' else 'Twelve Data live' if FX_SOURCE == 'twelve_data' else 'fallback'}</span>
       </div>
       <div class="bs-currency-toggle">
         <button class="bs-ccy-btn active" data-ccy="USD" onclick="switchCurrency('USD')">USD ($)</button>
