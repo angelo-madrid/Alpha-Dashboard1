@@ -1,11 +1,33 @@
 # ═════════════════════════════════════════════════════════════════════════════
 # ALPHA DASHBOARD — generate_dashboard.py
 # ═════════════════════════════════════════════════════════════════════════════
-#   VERSION   : 3.2.2
+#   VERSION   : 3.3.0
 #   DATE      : 2026-05-12
 #   PAIRS WITH: refresh.yml v3.0.8+, holdings.json v1.0+, Google Sheets (4 tabs)
 #   STRATEGY  : Bogle/Buffett anchored, Mag6-dominant, Active vs Legacy split
 #   CHANGELOG :
+#     3.3.0 — Cashflow + Projection tabs (Phase 2/3, May 12):
+#             • Cashflow tab: 3 stacked sections — Annual Summary (3 cards:
+#                cash surplus, total wealth growth incl. unrealized gains,
+#                active income surplus), Monthly distribution chart (income/
+#                expenses by frequency, net line overlay), Category drilldown
+#                (expandable rows for income/expense categories with line items).
+#             • Projection tab: 4 sections — Assumption chips header
+#                (salary growth, expense inflation, investment return,
+#                horizon, starting NW), Cashout timeline (bubble chart),
+#                Year-by-year table (NW trajectory with cashout impact),
+#                15-yr net worth chart (with cashouts vs reference line).
+#             • Phase 3 skeleton mode: shows empty-state banner when
+#                Major_Cashouts sheet has no rows; projection still computed
+#                using Settings tab assumptions and Cashflow data.
+#             • Currency toggle extended: cashflow/projection use PHP-native
+#                values (data-php attribute); switchCurrency now handles both
+#                data-usd (Balance Sheet) and data-php (Cashflow/Projection)
+#                sources cleanly.
+#             • restoreTab now supports all four tabs (was hardcoded to
+#                only 'holdings' before).
+#             • Charts on hidden tabs deferred until first activation to
+#                avoid layout/sizing issues.
 #     3.2.2 — FX rate sourced from Google Sheet (May 12):
 #             • Settings tab `usdphp_rate` key (GOOGLEFINANCE formula) is now
 #                the primary source for USD/PHP conversions.
@@ -153,7 +175,7 @@
 #     2.3.3 — Pre-populated FV_OVERLAY with May 2026 consensus.
 #     2.3.0 — Twelve Data + FRED migration.
 # ═════════════════════════════════════════════════════════════════════════════
-SCRIPT_VERSION = "3.2.2"
+SCRIPT_VERSION = "3.3.0"
 SCRIPT_DATE    = "2026-05-12"
 
 """
@@ -1887,6 +1909,278 @@ print(f"  Total Liabilities: ${balance_sheet['totals']['liabilities_usd']:>14,.0
 print(f"  NET WORTH        : ${balance_sheet['totals']['net_worth_usd']:>14,.0f}")
 print(f"  FX rate (PHP/USD): ₱{USDPHP_RATE:.4f}")
 
+# ─────────────────────────────────────────────────────────────────────────────
+# CASHFLOW COMPUTATION (Total Holdings tab — Phase 2)
+# ─────────────────────────────────────────────────────────────────────────────
+# Builds three views from the Cashflow sheet data:
+#   1. Annual summary: 3 surplus calculations (cash, with unrealized gains, active only)
+#   2. Monthly distribution: 12-month breakdown by frequency
+#   3. Category drilldown: line items grouped by category, sortable
+#
+# Settings tab values used:
+#   - investment_return: applied to liquid investments (excludes SPM Fund to avoid
+#     double-counting since SPM's 7% interest is already counted in income)
+#
+# Income/expense items have a `frequency` field that indicates how many times
+# per year that amount occurs (1 = annual lump sum, 12 = monthly, 4 = quarterly).
+# To distribute across 12 months we infer which months each frequency hits.
+
+def _build_cashflow_summary():
+    """Construct cashflow summary, monthly distribution, and category drilldown."""
+    cf_items = CASHFLOW_DATA.get("cashflow", [])
+    settings = CASHFLOW_DATA.get("settings", {})
+
+    if not cf_items:
+        # Phase 2 empty state — Sheet has no data yet
+        return {
+            "has_data": False,
+            "summary": {"income_php": 0, "expense_php": 0, "surplus_cash_php": 0,
+                        "investment_gains_php": 0, "surplus_with_gains_php": 0,
+                        "active_income_php": 0, "surplus_active_php": 0,
+                        "spm_interest_php": 0},
+            "monthly": [],
+            "income_categories": [],
+            "expense_categories": [],
+            "fx": {"usdphp_rate": USDPHP_RATE},
+        }
+
+    # ── 1. Annual Summary ──
+    income_total = sum(it["annual_php"] for it in cf_items if it["type"] == "income")
+    expense_total = sum(it["annual_php"] for it in cf_items if it["type"] == "expense")
+    surplus_cash = income_total - expense_total
+
+    # SPM interest (already in income — needed to avoid double-counting when adding
+    # unrealized gains from liquid investments)
+    spm_interest = sum(it["annual_php"] for it in cf_items
+                       if it["type"] == "income" and "spm" in it["label"].lower()
+                       and ("interest" in it["label"].lower() or "interest" in it["category"].lower()))
+
+    # Liquid investment portfolio for unrealized-gains estimate.
+    # We use total liquid investments from the balance sheet (active + legacy +
+    # esel + other_investments), then exclude SPM since its interest is already
+    # counted in income. Vehicles, real estate, business equity excluded as illiquid.
+    bs_data = balance_sheet
+    liquid_usd = 0.0
+    spm_value_usd = 0.0
+    for section in bs_data.get("asset_sections", []):
+        sid = section.get("id", "")
+        if sid in ("investments_active", "investments_legacy", "esel_investments"):
+            liquid_usd += section.get("total_usd", 0)
+        elif sid == "investments_other":
+            # SPM Fund lives here — subtract it specifically
+            for item in section.get("items", []):
+                lbl = item.get("label", "").lower()
+                if "spm" in lbl:
+                    spm_value_usd += item.get("value_usd", 0)
+                else:
+                    liquid_usd += item.get("value_usd", 0)
+    liquid_php = liquid_usd * USDPHP_RATE
+
+    inv_return_pct = float(settings.get("investment_return", 9)) / 100.0  # 9% default
+    investment_gains_php = liquid_php * inv_return_pct
+    surplus_with_gains = surplus_cash + investment_gains_php
+
+    # Active income surplus: income excluding SPM interest (work-driven income only)
+    active_income = income_total - spm_interest
+    surplus_active = active_income - expense_total
+
+    summary = {
+        "income_php": income_total,
+        "expense_php": expense_total,
+        "surplus_cash_php": surplus_cash,
+        "investment_gains_php": investment_gains_php,
+        "surplus_with_gains_php": surplus_with_gains,
+        "active_income_php": active_income,
+        "surplus_active_php": surplus_active,
+        "spm_interest_php": spm_interest,
+        "liquid_invest_php": liquid_php,
+        "inv_return_pct": inv_return_pct * 100,
+    }
+
+    # ── 2. Monthly Distribution ──
+    # Distribute each item across 12 months by frequency.
+    # Heuristic:
+    #   freq == 12 (monthly) → spread evenly across all 12 months
+    #   freq == 4 (quarterly) → hit months 3, 6, 9, 12 (Mar/Jun/Sep/Dec)
+    #   freq == 2 (semi-annual) → hit months 6, 12 (Jun/Dec)
+    #   freq == 1 (annual lump) → hit month 1 (Jan) for salaries; otherwise month 12 (Dec)
+    #     Salaries/major income hit January (annual paycheck distribution)
+    #     Other annual items (insurance, taxes, etc) default to January as well
+    #     for predictability — user can refine via Sheet later.
+    #   freq == 3, 6, etc → spread evenly across that many months starting Jan
+    months_income = [0.0] * 12
+    months_expense = [0.0] * 12
+    for it in cf_items:
+        freq = int(it.get("frequency", 1))
+        annual = it["annual_php"]
+        bucket = months_income if it["type"] == "income" else months_expense
+        if freq <= 0:
+            continue
+        per_event = annual / freq
+        if freq == 12:
+            for m in range(12): bucket[m] += per_event
+        elif freq == 4:
+            for m in [2, 5, 8, 11]: bucket[m] += per_event   # Mar/Jun/Sep/Dec
+        elif freq == 2:
+            for m in [5, 11]: bucket[m] += per_event          # Jun/Dec
+        elif freq == 1:
+            bucket[0] += per_event   # All annual → January
+        else:
+            # Distribute evenly across first N months
+            for m in range(min(freq, 12)): bucket[m] += per_event
+
+    month_labels = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
+                    "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+    monthly = []
+    for i, lbl in enumerate(month_labels):
+        monthly.append({
+            "month": lbl,
+            "income_php": months_income[i],
+            "expense_php": months_expense[i],
+            "net_php": months_income[i] - months_expense[i],
+        })
+
+    # ── 3. Category Drilldown ──
+    # Group items by (type, category), preserve line items as children.
+    def _group(type_):
+        groups = {}
+        order = []
+        for it in cf_items:
+            if it["type"] != type_:
+                continue
+            cat = it["category"] or "Uncategorized"
+            if cat not in groups:
+                groups[cat] = {"category": cat, "total_php": 0.0, "items": []}
+                order.append(cat)
+            groups[cat]["total_php"] += it["annual_php"]
+            groups[cat]["items"].append({
+                "label": it["label"],
+                "annual_php": it["annual_php"],
+                "amount_php": it["amount_php"],
+                "frequency": it["frequency"],
+                "note": it.get("note", ""),
+            })
+        out = [groups[c] for c in order]
+        out.sort(key=lambda g: g["total_php"], reverse=True)
+        return out
+
+    income_categories = _group("income")
+    expense_categories = _group("expense")
+
+    return {
+        "has_data": True,
+        "summary": summary,
+        "monthly": monthly,
+        "income_categories": income_categories,
+        "expense_categories": expense_categories,
+        "fx": {"usdphp_rate": USDPHP_RATE},
+    }
+
+cashflow_summary = _build_cashflow_summary()
+
+if cashflow_summary["has_data"]:
+    s = cashflow_summary["summary"]
+    print(f"\n── Cashflow Summary ──")
+    print(f"  Annual Income    : ₱{s['income_php']:>14,.0f}")
+    print(f"  Annual Expenses  : ₱{s['expense_php']:>14,.0f}")
+    print(f"  Cash Surplus     : ₱{s['surplus_cash_php']:>14,.0f}")
+    print(f"  Unrealized Gains : ₱{s['investment_gains_php']:>14,.0f} ({s['inv_return_pct']:.1f}% on ₱{s['liquid_invest_php']:,.0f} liquid)")
+    print(f"  Total w/ Gains   : ₱{s['surplus_with_gains_php']:>14,.0f}")
+    print(f"  Active Income    : ₱{s['active_income_php']:>14,.0f} (excludes SPM ₱{s['spm_interest_php']:,.0f})")
+    print(f"  Active Surplus   : ₱{s['surplus_active_php']:>14,.0f}")
+else:
+    print(f"\n── Cashflow Summary ── (Phase 2 — no Sheet data yet)")
+
+# ─────────────────────────────────────────────────────────────────────────────
+# MAJOR CASHOUTS + 15-YEAR PROJECTION (Total Holdings tab — Phase 3)
+# ─────────────────────────────────────────────────────────────────────────────
+# Builds the 15-year net worth projection layered with major life events.
+# Uses Settings tab assumptions:
+#   - salary_growth_rate: annual % increase in income
+#   - expense_inflation: annual % increase in expenses (uniform across categories)
+#   - investment_return: annual return on portfolio
+#   - projection_years: how many years to project (default 15)
+
+def _build_projection():
+    """Construct major cashouts table + 15-year net worth projection."""
+    cashouts = CASHFLOW_DATA.get("major_cashouts", [])
+    settings = CASHFLOW_DATA.get("settings", {})
+    cf_summary = cashflow_summary["summary"]
+
+    proj_years = int(settings.get("projection_years", 15))
+    salary_growth = float(settings.get("salary_growth_rate", 5)) / 100.0
+    expense_infl = float(settings.get("expense_inflation", 4)) / 100.0
+    inv_return = float(settings.get("investment_return", 9)) / 100.0
+
+    starting_nw_usd = balance_sheet["totals"]["net_worth_usd"]
+    starting_nw_php = starting_nw_usd * USDPHP_RATE
+    starting_income = cf_summary.get("income_php", 0)
+    starting_expense = cf_summary.get("expense_php", 0)
+
+    current_year = datetime.today().year
+
+    # Aggregate cashouts by year for the projection model (convert USD → PHP)
+    cashouts_by_year = {}
+    for co in cashouts:
+        yr = co["year"]
+        amt_usd = co.get("amount_usd", 0)
+        amt_php = amt_usd * USDPHP_RATE
+        cashouts_by_year[yr] = cashouts_by_year.get(yr, 0) + amt_php
+
+    # Year-by-year projection
+    projection = []
+    nw_php = starting_nw_php
+    running_total_cashout = 0.0
+    for i in range(proj_years + 1):
+        yr = current_year + i
+        income_yr = starting_income * ((1 + salary_growth) ** i)
+        expense_yr = starting_expense * ((1 + expense_infl) ** i)
+        surplus_yr = income_yr - expense_yr
+        # Investment growth applied to start-of-year balance
+        gains_yr = nw_php * inv_return
+        # Major cashout this year (if any)
+        cashout_yr = cashouts_by_year.get(yr, 0)
+        running_total_cashout += cashout_yr
+        # End of year net worth
+        nw_php = nw_php + surplus_yr + gains_yr - cashout_yr
+
+        projection.append({
+            "year": yr,
+            "year_index": i,
+            "income_php": income_yr,
+            "expense_php": expense_yr,
+            "surplus_php": surplus_yr,
+            "gains_php": gains_yr,
+            "cashout_php": cashout_yr,
+            "net_worth_php": nw_php,
+            "running_cashout_php": running_total_cashout,
+        })
+
+    return {
+        "has_cashout_data": len(cashouts) > 0,
+        "cashouts": cashouts,
+        "projection": projection,
+        "assumptions": {
+            "salary_growth_pct": salary_growth * 100,
+            "expense_inflation_pct": expense_infl * 100,
+            "investment_return_pct": inv_return * 100,
+            "projection_years": proj_years,
+            "starting_nw_php": starting_nw_php,
+            "starting_nw_usd": starting_nw_usd,
+        },
+        "fx": {"usdphp_rate": USDPHP_RATE},
+    }
+
+projection_data = _build_projection()
+print(f"\n── Projection (Phase 3) ──")
+print(f"  Years projected   : {projection_data['assumptions']['projection_years']}")
+print(f"  Starting NW       : ₱{projection_data['assumptions']['starting_nw_php']:,.0f}")
+print(f"  Major cashouts    : {len(projection_data['cashouts'])} items"
+      + (" (Sheet empty — populate Major_Cashouts tab)" if not projection_data["has_cashout_data"] else ""))
+if projection_data["projection"]:
+    final = projection_data["projection"][-1]
+    print(f"  Year {final['year']} NW       : ₱{final['net_worth_php']:,.0f}")
+
 # ── JSON PAYLOAD ──────────────────────────────────────────────────────────────
 payload = json.dumps({
     "horizons":     all_data,
@@ -1900,6 +2194,8 @@ payload = json.dumps({
     "plain_cash":   plain_cash_ibkr,
     "monthly_input": 12820,
     "balance_sheet": balance_sheet,
+    "cashflow_summary": cashflow_summary,
+    "projection": projection_data,
     "fetched_at":   fetched_at,
 }, separators=(",",":"))
 
@@ -2128,9 +2424,301 @@ else:
         </tr>"""
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# HTML STRING
-# ─────────────────────────────────────────────────────────────────────────────
+# ── Cashflow tab HTML (Phase 2) ──
+# Three stacked sections: annual summary, monthly chart, category drilldown.
+# Values stored in PHP with data-php attributes for JS currency toggle.
+def _build_cashflow_tab_html():
+    cs = cashflow_summary
+    rate = USDPHP_RATE
+    if not cs["has_data"]:
+        return f"""
+    <!-- Currency toggle (matches Balance Sheet pattern) -->
+    <div class="bs-header-row">
+      <div class="bs-fx-info">
+        <span class="bs-fx-label">FX Rate:</span>
+        <span class="bs-fx-rate">₱{rate:.4f} / $1</span>
+      </div>
+      <div class="bs-currency-toggle">
+        <button class="bs-ccy-btn active" data-ccy="USD" onclick="switchCurrency('USD')">USD ($)</button>
+        <button class="bs-ccy-btn" data-ccy="PHP" onclick="switchCurrency('PHP')">PHP (₱)</button>
+      </div>
+    </div>
+    <div class="bs-section">
+      <div class="cf-empty">
+        <div class="cf-empty-icon">⏳</div>
+        <div class="cf-empty-title">Cashflow tab — waiting for Sheet data</div>
+        <div class="cf-empty-msg">Populate the <code>Cashflow</code> tab of your Google Sheet with income and expense rows. Columns: Type, Category, Label, Amount_PHP, Frequency, Annual_Total_PHP, Notes.</div>
+      </div>
+    </div>"""
+
+    s = cs["summary"]
+
+    def php_cell(php_val, bold=False):
+        """Render a cell with both PHP and USD values, toggleable."""
+        usd_val = php_val / rate if rate else 0
+        wrapper = "strong" if bold else "span"
+        return f'<{wrapper} data-php="{php_val:.2f}" data-usd="{usd_val:.2f}">₱{php_val:,.0f}</{wrapper}>'
+
+    # ── 1. Annual Summary cards ──
+    header_html = f"""
+    <!-- Currency toggle (matches Balance Sheet pattern) -->
+    <div class="bs-header-row">
+      <div class="bs-fx-info">
+        <span class="bs-fx-label">FX Rate:</span>
+        <span class="bs-fx-rate">₱{rate:.4f} / $1</span>
+      </div>
+      <div class="bs-currency-toggle">
+        <button class="bs-ccy-btn active" data-ccy="USD" onclick="switchCurrency('USD')">USD ($)</button>
+        <button class="bs-ccy-btn" data-ccy="PHP" onclick="switchCurrency('PHP')">PHP (₱)</button>
+      </div>
+    </div>"""
+    summary_html = f"""
+    <div class="bs-section">
+      <div class="section-hd">
+        <span>1 · ANNUAL SUMMARY</span>
+        <span style="font-size:9px;color:var(--mut)">Three views of yearly surplus</span>
+      </div>
+      <div class="cf-summary-grid">
+        <div class="cf-summary-card">
+          <div class="cf-card-title">Cash Surplus</div>
+          <div class="cf-card-sub">Income − Expenses (Sheet totals)</div>
+          <div class="cf-card-row"><span>Income</span>{php_cell(s['income_php'])}</div>
+          <div class="cf-card-row"><span>Expenses</span>{php_cell(s['expense_php'])}</div>
+          <div class="cf-card-divider"></div>
+          <div class="cf-card-headline">{php_cell(s['surplus_cash_php'], bold=True)}</div>
+        </div>
+
+        <div class="cf-summary-card cf-card-mid">
+          <div class="cf-card-title">Total Wealth Growth</div>
+          <div class="cf-card-sub">Cash surplus + unrealized investment gains ({s['inv_return_pct']:.1f}% on liquid)</div>
+          <div class="cf-card-row"><span>Cash Surplus</span>{php_cell(s['surplus_cash_php'])}</div>
+          <div class="cf-card-row"><span>Inv. Gains (est.)</span>{php_cell(s['investment_gains_php'])}</div>
+          <div class="cf-card-divider"></div>
+          <div class="cf-card-headline">{php_cell(s['surplus_with_gains_php'], bold=True)}</div>
+        </div>
+
+        <div class="cf-summary-card">
+          <div class="cf-card-title">Active Income Surplus</div>
+          <div class="cf-card-sub">Work-driven (excludes SPM ₱{s['spm_interest_php']:,.0f} interest)</div>
+          <div class="cf-card-row"><span>Active Income</span>{php_cell(s['active_income_php'])}</div>
+          <div class="cf-card-row"><span>Expenses</span>{php_cell(s['expense_php'])}</div>
+          <div class="cf-card-divider"></div>
+          <div class="cf-card-headline">{php_cell(s['surplus_active_php'], bold=True)}</div>
+        </div>
+      </div>
+    </div>"""
+
+    # ── 2. Monthly Breakdown Chart ──
+    monthly_html = """
+    <div class="bs-section">
+      <div class="section-hd">
+        <span>2 · MONTHLY BREAKDOWN</span>
+        <span style="font-size:9px;color:var(--mut)">Income/expenses distributed by frequency · Annual lumps → January</span>
+      </div>
+      <div class="cf-chart-wrap"><canvas id="cfMonthlyChart" role="img" aria-label="Monthly income vs expenses chart"></canvas></div>
+      <div class="cf-legend">
+        <div class="cf-li"><div class="cf-ln" style="background:#15803d"></div>Income</div>
+        <div class="cf-li"><div class="cf-ln" style="background:#b91c1c"></div>Expenses</div>
+        <div class="cf-li"><div class="cf-ln" style="background:#1d4ed8;height:3px"></div>Net Cashflow</div>
+      </div>
+    </div>"""
+
+    # ── 3. Income Categories drilldown ──
+    income_rows = ""
+    for cat in cs["income_categories"]:
+        cat_id = "inc-" + cat["category"].replace(" ", "-").lower()
+        income_rows += f"""
+        <tr class="cf-cat-row" onclick="toggleCategory('{cat_id}')">
+          <td><span class="cf-toggle" id="{cat_id}-toggle">▸</span> <strong>{cat['category']}</strong></td>
+          <td class="cf-num">{php_cell(cat['total_php'], bold=True)}</td>
+          <td class="cf-num bs-mut">{len(cat['items'])} item{'s' if len(cat['items']) != 1 else ''}</td>
+        </tr>"""
+        for it in cat["items"]:
+            freq = int(it["frequency"])
+            freq_lbl = {12: "monthly", 4: "quarterly", 2: "semi-annual", 1: "annual"}.get(freq, f"{freq}×/yr")
+            income_rows += f"""
+        <tr class="cf-item-row cf-hidden" data-parent="{cat_id}">
+          <td><span class="bs-tree">├─</span> {it['label']} <span class="cf-freq">({freq_lbl})</span></td>
+          <td class="cf-num">{php_cell(it['annual_php'])}</td>
+          <td class="cf-num bs-mut">{it.get('note', '')}</td>
+        </tr>"""
+
+    expense_rows = ""
+    for cat in cs["expense_categories"]:
+        cat_id = "exp-" + cat["category"].replace(" ", "-").lower()
+        pct = (cat["total_php"] / s["expense_php"] * 100) if s["expense_php"] else 0
+        expense_rows += f"""
+        <tr class="cf-cat-row" onclick="toggleCategory('{cat_id}')">
+          <td><span class="cf-toggle" id="{cat_id}-toggle">▸</span> <strong>{cat['category']}</strong></td>
+          <td class="cf-num">{php_cell(cat['total_php'], bold=True)}</td>
+          <td class="cf-num bs-mut">{pct:.1f}% · {len(cat['items'])} item{'s' if len(cat['items']) != 1 else ''}</td>
+        </tr>"""
+        for it in cat["items"]:
+            freq = int(it["frequency"])
+            freq_lbl = {12: "monthly", 4: "quarterly", 2: "semi-annual", 1: "annual"}.get(freq, f"{freq}×/yr")
+            expense_rows += f"""
+        <tr class="cf-item-row cf-hidden" data-parent="{cat_id}">
+          <td><span class="bs-tree">├─</span> {it['label']} <span class="cf-freq">({freq_lbl})</span></td>
+          <td class="cf-num">{php_cell(it['annual_php'])}</td>
+          <td class="cf-num bs-mut">{it.get('note', '')}</td>
+        </tr>"""
+
+    drilldown_html = f"""
+    <div class="bs-section">
+      <div class="section-hd">
+        <span>3 · CATEGORY DRILLDOWN</span>
+        <span style="font-size:9px;color:var(--mut)">Click any category row to expand line items</span>
+      </div>
+
+      <div class="cf-subhd cf-subhd-inc">INCOME · ₱{s['income_php']:,.0f} annual</div>
+      <table class="cf-table">
+        <thead>
+          <tr><th>Category / Line Item</th><th class="cf-num">Annual</th><th class="cf-num">Detail</th></tr>
+        </thead>
+        <tbody>{income_rows}
+        </tbody>
+      </table>
+
+      <div class="cf-subhd cf-subhd-exp" style="margin-top:20px">EXPENSES · ₱{s['expense_php']:,.0f} annual</div>
+      <table class="cf-table">
+        <thead>
+          <tr><th>Category / Line Item</th><th class="cf-num">Annual</th><th class="cf-num">% / Detail</th></tr>
+        </thead>
+        <tbody>{expense_rows}
+        </tbody>
+      </table>
+    </div>"""
+
+    return header_html + summary_html + monthly_html + drilldown_html
+
+cashflow_tab_html = _build_cashflow_tab_html()
+
+# ── Projection tab HTML (Phase 3) ──
+# Three stacked sections: timeline chart, year-by-year table, 15-yr NW projection.
+# Skeleton mode when Major_Cashouts sheet is empty.
+def _build_projection_tab_html():
+    pd_ = projection_data
+    a = pd_["assumptions"]
+    has_co = pd_["has_cashout_data"]
+    rate = USDPHP_RATE
+
+    header_html = f"""
+    <!-- Currency toggle (matches Balance Sheet pattern) -->
+    <div class="bs-header-row">
+      <div class="bs-fx-info">
+        <span class="bs-fx-label">FX Rate:</span>
+        <span class="bs-fx-rate">₱{rate:.4f} / $1</span>
+      </div>
+      <div class="bs-currency-toggle">
+        <button class="bs-ccy-btn active" data-ccy="USD" onclick="switchCurrency('USD')">USD ($)</button>
+        <button class="bs-ccy-btn" data-ccy="PHP" onclick="switchCurrency('PHP')">PHP (₱)</button>
+      </div>
+    </div>"""
+
+    # Empty-state banner if Sheet not populated
+    cashout_banner = ""
+    if not has_co:
+        cashout_banner = """
+      <div class="cf-empty cf-empty-inline">
+        <strong>No major cashouts populated yet.</strong> Add rows to the <code>Major_Cashouts</code> tab (columns: Year, Item, Amount_USD, Category, Notes) to see them appear in the timeline and pull from net worth in the projection.
+      </div>"""
+
+    # ── Assumption chips header ──
+    assumptions_html = f"""
+    <div class="bs-section">
+      <div class="section-hd">
+        <span>PROJECTION ASSUMPTIONS</span>
+        <span style="font-size:9px;color:var(--mut)">From Settings tab · Editable in Sheet</span>
+      </div>
+      <div class="proj-chips">
+        <div class="proj-chip"><span>{a['salary_growth_pct']:.1f}%</span><small>Salary Growth</small></div>
+        <div class="proj-chip"><span>{a['expense_inflation_pct']:.1f}%</span><small>Expense Inflation</small></div>
+        <div class="proj-chip"><span>{a['investment_return_pct']:.1f}%</span><small>Investment Return</small></div>
+        <div class="proj-chip"><span>{a['projection_years']}y</span><small>Horizon</small></div>
+        <div class="proj-chip proj-chip-nw"><span>${a['starting_nw_usd']/1000:,.0f}K</span><small>Starting Net Worth</small></div>
+      </div>
+    </div>"""
+
+    # ── 1. Timeline chart ──
+    timeline_html = f"""
+    <div class="bs-section">
+      <div class="section-hd">
+        <span>1 · CASHOUT TIMELINE</span>
+        <span style="font-size:9px;color:var(--mut)">Bubble size = amount · Hover for details</span>
+      </div>
+      {cashout_banner}
+      <div class="cf-chart-wrap"><canvas id="projTimelineChart" role="img" aria-label="Major cashouts timeline"></canvas></div>
+    </div>"""
+
+    # ── 2. Year-by-year table ──
+    table_rows = ""
+    cashouts_by_year = {}
+    for co in pd_["cashouts"]:
+        cashouts_by_year.setdefault(co["year"], []).append(co)
+
+    for row in pd_["projection"]:
+        yr = row["year"]
+        yr_cashouts = cashouts_by_year.get(yr, [])
+        nw_php = row["net_worth_php"]
+        nw_usd = nw_php / USDPHP_RATE if USDPHP_RATE else 0
+        co_php = row["cashout_php"]
+        co_usd = co_php / USDPHP_RATE if USDPHP_RATE else 0
+        running_co_usd = row["running_cashout_php"] / USDPHP_RATE if USDPHP_RATE else 0
+
+        # Cashout items column
+        if yr_cashouts:
+            items_str = ", ".join([f"{co['item']} (${co['amount_usd']/1000:,.0f}K)" for co in yr_cashouts])
+        else:
+            items_str = "—"
+
+        cashout_cls = "cf-num proj-cashout" if co_php > 0 else "cf-num bs-mut"
+        table_rows += f"""
+        <tr class="proj-row">
+          <td><strong>{yr}</strong></td>
+          <td class="cf-num"><span data-php="{nw_php:.2f}" data-usd="{nw_usd:.2f}">₱{nw_php/1e6:,.1f}M</span></td>
+          <td class="{cashout_cls}"><span data-php="{co_php:.2f}" data-usd="{co_usd:.2f}">{'₱' + f'{co_php/1e6:,.1f}M' if co_php > 0 else '—'}</span></td>
+          <td class="cf-num bs-mut"><span data-php="{row['running_cashout_php']:.2f}" data-usd="{running_co_usd:.2f}">₱{row['running_cashout_php']/1e6:,.1f}M</span></td>
+          <td class="cf-num bs-mut">{items_str}</td>
+        </tr>"""
+
+    yearly_html = f"""
+    <div class="bs-section">
+      <div class="section-hd">
+        <span>2 · YEAR-BY-YEAR</span>
+        <span style="font-size:9px;color:var(--mut)">Net worth trajectory with cashout impact</span>
+      </div>
+      <table class="cf-table">
+        <thead>
+          <tr>
+            <th>Year</th>
+            <th class="cf-num">Net Worth (EOY)</th>
+            <th class="cf-num">Cashout</th>
+            <th class="cf-num">Running Total</th>
+            <th class="cf-num">Items</th>
+          </tr>
+        </thead>
+        <tbody>{table_rows}
+        </tbody>
+      </table>
+    </div>"""
+
+    # ── 3. 15-year projection chart ──
+    nw_chart_html = """
+    <div class="bs-section">
+      <div class="section-hd">
+        <span>3 · 15-YEAR NET WORTH PROJECTION</span>
+        <span style="font-size:9px;color:var(--mut)">Compound growth − major cashouts</span>
+      </div>
+      <div class="cf-chart-wrap" style="height:340px"><canvas id="projNWChart" role="img" aria-label="15-year net worth projection"></canvas></div>
+      <div class="cf-legend">
+        <div class="cf-li"><div class="cf-ln" style="background:#7c3aed"></div>Net Worth (with cashouts)</div>
+        <div class="cf-li"><div class="cf-ln" style="background:#7c3aed;opacity:.35;border-top:1.5px dashed #7c3aed"></div>Without cashouts (reference)</div>
+      </div>
+    </div>"""
+
+    return header_html + assumptions_html + timeline_html + yearly_html + nw_chart_html
+
+projection_tab_html = _build_projection_tab_html()
 
 html = f"""<!DOCTYPE html>
 <html lang="en">
@@ -2378,6 +2966,75 @@ hr{{border:none;border-top:.5px solid var(--bdr);margin:24px 0 12px}}
 .bs-footnote{{margin-top:20px;padding:12px 14px;background:var(--surf2);border:.5px solid var(--bdr);border-radius:4px;font-size:10px;color:var(--mut);line-height:1.6}}
 .bs-footnote code{{background:var(--bg);padding:1px 5px;border-radius:2px;font-family:'JetBrains Mono',monospace;font-size:9.5px;color:var(--txt)}}
 
+/* ═══════════════════════════════════════════════════════════════════════════
+   CASHFLOW + PROJECTION TABS — Phase 2/3
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* Empty state */
+.cf-empty{{padding:32px 24px;background:var(--surf2);border:.5px solid var(--bdr);border-radius:6px;text-align:center;color:var(--mut)}}
+.cf-empty-inline{{padding:14px 16px;text-align:left;margin-bottom:16px;font-size:11px;color:var(--mut)}}
+.cf-empty-inline strong{{color:var(--txt)}}
+.cf-empty-icon{{font-size:32px;margin-bottom:10px}}
+.cf-empty-title{{font-family:'Syne',sans-serif;font-size:15px;font-weight:700;color:var(--txt);margin-bottom:6px}}
+.cf-empty-msg{{font-size:11px;line-height:1.6;max-width:560px;margin:0 auto}}
+.cf-empty code{{background:var(--bg);padding:1px 5px;border-radius:2px;font-size:10px;color:var(--txt)}}
+
+/* Annual Summary cards (3-col grid) */
+.cf-summary-grid{{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px}}
+.cf-summary-card{{background:var(--surf);border:.5px solid var(--bdr);border-radius:6px;padding:16px 18px}}
+.cf-card-mid{{border-top:2px solid var(--zone)}}
+.cf-card-title{{font-family:'Syne',sans-serif;font-size:13px;font-weight:700;color:var(--txt);margin-bottom:2px}}
+.cf-card-sub{{font-size:9px;color:var(--mut);margin-bottom:14px;line-height:1.4}}
+.cf-card-row{{display:flex;justify-content:space-between;font-size:11px;padding:5px 0;color:var(--mut)}}
+.cf-card-row strong, .cf-card-row span[data-php]{{color:var(--txt);font-family:'DM Mono',monospace;font-weight:500}}
+.cf-card-divider{{height:1px;background:var(--bdr);margin:10px 0 6px}}
+.cf-card-headline{{font-family:'Syne',sans-serif;font-size:22px;font-weight:700;color:var(--txt);text-align:right;letter-spacing:-.01em}}
+.cf-card-mid .cf-card-headline{{color:var(--zone)}}
+
+/* Monthly chart */
+.cf-chart-wrap{{position:relative;width:100%;height:280px;background:var(--surf);border:.5px solid var(--bdr);border-radius:6px;padding:14px}}
+.cf-legend{{display:flex;gap:16px;flex-wrap:wrap;margin-top:8px;font-size:9px;color:var(--mut)}}
+.cf-li{{display:flex;align-items:center;gap:5px}}
+.cf-ln{{width:14px;height:2px;flex-shrink:0}}
+
+/* Drilldown table */
+.cf-subhd{{font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--mut);margin:0 0 8px;padding:6px 10px;background:var(--surf2);border-radius:3px;font-weight:600}}
+.cf-subhd-inc{{color:#15803d;background:#f0fdf4}}
+.cf-subhd-exp{{color:#b91c1c;background:#fef2f2}}
+.cf-table{{width:100%;border-collapse:collapse;font-size:11px;background:var(--surf);border:.5px solid var(--bdr);border-radius:6px;overflow:hidden;margin-bottom:8px}}
+.cf-table th{{font-size:9px;letter-spacing:.1em;text-transform:uppercase;color:var(--mut);padding:7px 10px;text-align:left;border-bottom:1px solid var(--bdr);background:var(--surf2);white-space:nowrap}}
+.cf-table th.cf-num{{text-align:right}}
+.cf-table td{{padding:8px 10px;border-bottom:.5px solid var(--bdr);vertical-align:middle}}
+.cf-table tr:last-child td{{border-bottom:none}}
+.cf-num{{text-align:right;font-variant-numeric:tabular-nums}}
+.cf-cat-row{{cursor:pointer;background:var(--surf)}}
+.cf-cat-row:hover{{background:var(--dim)}}
+.cf-cat-row td{{padding:9px 10px}}
+.cf-toggle{{color:var(--mut);font-family:monospace;display:inline-block;width:12px;font-size:10px;transition:transform .15s}}
+.cf-toggle.open{{transform:rotate(90deg)}}
+.cf-item-row{{background:#fafaf7}}
+.cf-item-row td:first-child{{padding-left:30px;font-size:10.5px;color:var(--mut)}}
+.cf-item-row td.cf-num{{color:var(--txt)}}
+.cf-hidden{{display:none}}
+.cf-freq{{font-size:9px;color:var(--mut);font-style:italic;margin-left:4px}}
+
+/* Projection tab */
+.proj-chips{{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:18px}}
+.proj-chip{{background:var(--surf);border:.5px solid var(--bdr);border-radius:5px;padding:10px 14px;text-align:center;min-width:100px}}
+.proj-chip span{{display:block;font-family:'Syne',sans-serif;font-size:18px;font-weight:700;color:var(--txt);line-height:1.1}}
+.proj-chip small{{font-size:9px;color:var(--mut);letter-spacing:.08em;text-transform:uppercase}}
+.proj-chip-nw{{border-color:var(--zone);background:linear-gradient(180deg, var(--surf) 0%, var(--surf2) 100%)}}
+.proj-chip-nw span{{color:var(--zone)}}
+.proj-row td{{padding:7px 10px}}
+.proj-cashout{{color:var(--red);font-weight:600}}
+
+@media(max-width:780px){{
+  .cf-summary-grid{{grid-template-columns:1fr;gap:8px}}
+  .proj-chips{{justify-content:center}}
+  .cf-table th:nth-child(3),.cf-table td:nth-child(3){{display:none}}
+  .cf-table th:nth-child(5),.cf-table td:nth-child(5){{display:none}}
+}}
+
 @media(max-width:780px){{
   .bs-headline{{flex-direction:column;gap:6px}}
   .bs-headline-op{{display:none}}
@@ -2423,6 +3080,8 @@ hr{{border:none;border-top:.5px solid var(--bdr);margin:24px 0 12px}}
   <div class="main-tabs">
     <button class="main-tab active" data-tab="investment" onclick="switchMainTab('investment')">Investment Dashboard</button>
     <button class="main-tab" data-tab="holdings" onclick="switchMainTab('holdings')">Total Holdings</button>
+    <button class="main-tab" data-tab="cashflow" onclick="switchMainTab('cashflow')">Cashflow</button>
+    <button class="main-tab" data-tab="projection" onclick="switchMainTab('projection')">Projection</button>
   </div>
 
   <!-- ═══════════════════════════════════════════════════════════════ -->
@@ -2718,12 +3377,24 @@ hr{{border:none;border-top:.5px solid var(--bdr);margin:24px 0 12px}}
     </div>
 
     <div class="bs-footnote">
-      Phase 1 of Total Holdings dashboard — Balance Sheet only. Cashflow (income/expenses) and 15-year projection coming in Phase 2 and Phase 3.
-      Investment accounts auto-sync from <code>holdings.json</code> × live prices. Other categories edited in <code>cashflow.json</code>.
-      PHP values converted at live USD/PHP rate from Twelve Data.
+      Balance Sheet auto-syncs from Google Sheets <code>Balance_Sheet</code> tab + <code>holdings.json</code> × live prices.
+      Cashflow and Projection tabs use <code>Cashflow</code>, <code>Major_Cashouts</code>, and <code>Settings</code> tabs.
+      PHP values converted at FX rate from Settings tab (GOOGLEFINANCE) or Twelve Data fallback.
     </div>
 
   </div> <!-- end #tab-holdings -->
+
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <!-- TAB 3: CASHFLOW (Phase 2)                                       -->
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <div id="tab-cashflow" class="tab-content">{cashflow_tab_html}
+  </div> <!-- end #tab-cashflow -->
+
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <!-- TAB 4: PROJECTION (Phase 3)                                     -->
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <div id="tab-projection" class="tab-content">{projection_tab_html}
+  </div> <!-- end #tab-projection -->
 
   <hr/>
   <div class="footer">
@@ -2749,7 +3420,7 @@ let curTab='7D', curYCTab='5Y', useLog=false;
 let chartInst=null, ycInst=null;
 let curCurrency = 'USD';   // toggle state for Total Holdings tab
 
-// ── MAIN TAB SWITCHING — Investment Dashboard | Total Holdings ──────────────
+// ── MAIN TAB SWITCHING — Investment Dashboard | Total Holdings | Cashflow | Projection ──
 function switchMainTab(tabId){{
   document.querySelectorAll('.main-tab').forEach(b => {{
     b.classList.toggle('active', b.dataset.tab === tabId);
@@ -2759,9 +3430,15 @@ function switchMainTab(tabId){{
   }});
   // Persist tab preference
   try {{ localStorage.setItem('dashboard_tab', tabId); }} catch(e) {{}}
-  // Charts in the Investment tab need a redraw when their container becomes visible
+  // Charts need a redraw when their container becomes visible
   if(tabId === 'investment' && chartInst){{
     setTimeout(() => {{ try{{ chartInst.update(); ycInst && ycInst.update(); }} catch(e){{}} }}, 50);
+  }}
+  if(tabId === 'cashflow'){{
+    setTimeout(() => {{ renderCashflowChart(); }}, 50);
+  }}
+  if(tabId === 'projection'){{
+    setTimeout(() => {{ renderProjectionCharts(); }}, 50);
   }}
 }}
 
@@ -2769,7 +3446,7 @@ function switchMainTab(tabId){{
 function restoreTab(){{
   try {{
     const saved = localStorage.getItem('dashboard_tab');
-    if(saved === 'holdings') switchMainTab('holdings');
+    if(saved && saved !== 'investment') switchMainTab(saved);
   }} catch(e) {{}}
 }}
 
@@ -2783,17 +3460,40 @@ function fmtCurrency(amountUsd, ccy){{
   return '$' + Math.round(amountUsd).toLocaleString();
 }}
 
+function fmtPhpUsd(phpVal, ccy){{
+  // Used by Cashflow/Projection tabs where values are PHP-native
+  if(ccy === 'PHP'){{
+    // Smart-format: M for millions, K for thousands
+    if(Math.abs(phpVal) >= 1e6) return '₱' + (phpVal/1e6).toFixed(1) + 'M';
+    if(Math.abs(phpVal) >= 1e4) return '₱' + Math.round(phpVal).toLocaleString();
+    return '₱' + Math.round(phpVal).toLocaleString();
+  }}
+  const usd = phpVal / FX_USDPHP;
+  if(Math.abs(usd) >= 1e6) return '$' + (usd/1e6).toFixed(2) + 'M';
+  if(Math.abs(usd) >= 1e3) return '$' + Math.round(usd).toLocaleString();
+  return '$' + usd.toFixed(2);
+}}
+
 function switchCurrency(ccy){{
   curCurrency = ccy;
   // Update button states
   document.querySelectorAll('.bs-ccy-btn').forEach(b => {{
     b.classList.toggle('active', b.dataset.ccy === ccy);
   }});
-  // Re-render every element with data-usd attribute
-  document.querySelectorAll('[data-usd]').forEach(el => {{
+  // Re-render USD-native elements (Balance Sheet tab)
+  document.querySelectorAll('[data-usd]:not([data-php])').forEach(el => {{
     const usd = parseFloat(el.getAttribute('data-usd'));
     if(!isNaN(usd)) el.textContent = fmtCurrency(usd, ccy);
   }});
+  // Re-render PHP-native elements (Cashflow/Projection tabs) — uses both data-php
+  // (canonical) and data-usd (computed) attributes for accurate conversion
+  document.querySelectorAll('[data-php]').forEach(el => {{
+    const php = parseFloat(el.getAttribute('data-php'));
+    if(!isNaN(php)) el.textContent = fmtPhpUsd(php, ccy);
+  }});
+  // Re-render charts to reflect new currency (cashflow + projection only)
+  if(typeof renderCashflowChart === 'function') renderCashflowChart();
+  if(typeof renderProjectionCharts === 'function') renderProjectionCharts();
   // Persist preference
   try {{ localStorage.setItem('dashboard_ccy', ccy); }} catch(e) {{}}
 }}
@@ -2804,6 +3504,184 @@ function restoreCurrency(){{
     const saved = localStorage.getItem('dashboard_ccy');
     if(saved === 'PHP') switchCurrency('PHP');
   }} catch(e) {{}}
+}}
+
+// ── CATEGORY DRILLDOWN TOGGLE ───────────────────────────────────────────────
+function toggleCategory(catId){{
+  const toggle = document.getElementById(catId + '-toggle');
+  const rows = document.querySelectorAll(`tr[data-parent="${{catId}}"]`);
+  const isOpen = toggle && toggle.classList.contains('open');
+  rows.forEach(r => r.classList.toggle('cf-hidden', isOpen));
+  if(toggle) toggle.classList.toggle('open', !isOpen);
+}}
+
+// ── CASHFLOW: MONTHLY CHART ─────────────────────────────────────────────────
+let cfMonthlyInst = null;
+function renderCashflowChart(){{
+  if(!DATA.cashflow_summary || !DATA.cashflow_summary.has_data) return;
+  const monthly = DATA.cashflow_summary.monthly;
+  const canvas = document.getElementById('cfMonthlyChart');
+  if(!canvas) return;
+  if(cfMonthlyInst){{ cfMonthlyInst.destroy(); cfMonthlyInst = null; }}
+
+  const ccy = curCurrency;
+  const conv = v => ccy === 'PHP' ? v : v / FX_USDPHP;
+  const symbol = ccy === 'PHP' ? '₱' : '$';
+
+  const labels = monthly.map(m => m.month);
+  const incomeData = monthly.map(m => conv(m.income_php));
+  const expenseData = monthly.map(m => conv(m.expense_php));
+  const netData = monthly.map(m => conv(m.net_php));
+
+  cfMonthlyInst = new Chart(canvas.getContext('2d'), {{
+    type: 'bar',
+    data: {{
+      labels: labels,
+      datasets: [
+        {{label: 'Income',   data: incomeData,  backgroundColor: 'rgba(21,128,61,.75)',  borderColor: '#15803d', borderWidth: 0, order: 2}},
+        {{label: 'Expenses', data: expenseData, backgroundColor: 'rgba(185,28,28,.75)',  borderColor: '#b91c1c', borderWidth: 0, order: 2}},
+        {{label: 'Net',      data: netData,     type: 'line', borderColor: '#1d4ed8', borderWidth: 2.5, pointRadius: 3, pointBackgroundColor: '#1d4ed8', tension: .1, order: 1, backgroundColor: 'transparent'}}
+      ]
+    }},
+    options: {{
+      responsive: true, maintainAspectRatio: false, animation: {{duration: 250}},
+      interaction: {{mode: 'index', intersect: false}},
+      plugins: {{
+        legend: {{display: false}},
+        tooltip: {{
+          backgroundColor: 'rgba(255,255,255,.98)', borderColor: '#d1d5db', borderWidth: .5,
+          titleColor: '#111827', bodyColor: '#374151',
+          titleFont: {{size: 10, family: 'monospace'}}, bodyFont: {{size: 10, family: 'monospace'}},
+          callbacks: {{
+            label(i){{
+              const v = i.raw;
+              if(Math.abs(v) >= 1e6) return ` ${{i.dataset.label}}: ${{symbol}}${{(v/1e6).toFixed(2)}}M`;
+              if(Math.abs(v) >= 1e3) return ` ${{i.dataset.label}}: ${{symbol}}${{Math.round(v).toLocaleString()}}`;
+              return ` ${{i.dataset.label}}: ${{symbol}}${{Math.round(v).toLocaleString()}}`;
+            }}
+          }}
+        }}
+      }},
+      scales: {{
+        x: {{ticks: {{color: '#9ca3af', font: {{size: 9, family: 'monospace'}}}}, grid: {{color: '#f3f4f6'}}}},
+        y: {{ticks: {{color: '#9ca3af', font: {{size: 9, family: 'monospace'}}, callback: v => {{
+              if(Math.abs(v) >= 1e6) return symbol + (v/1e6).toFixed(1) + 'M';
+              if(Math.abs(v) >= 1e3) return symbol + Math.round(v/1e3) + 'K';
+              return symbol + v;
+            }}}}, grid: {{color: '#f3f4f6'}}}}
+      }}
+    }}
+  }});
+}}
+
+// ── PROJECTION: TIMELINE + 15-YR NET WORTH CHARTS ───────────────────────────
+let projTimelineInst = null;
+let projNWInst = null;
+function renderProjectionCharts(){{
+  if(!DATA.projection) return;
+  const proj = DATA.projection.projection;
+  const cashouts = DATA.projection.cashouts;
+  const a = DATA.projection.assumptions;
+  const ccy = curCurrency;
+  const conv = v => ccy === 'PHP' ? v : v / FX_USDPHP;
+  const symbol = ccy === 'PHP' ? '₱' : '$';
+  const fmtBig = v => {{
+    if(Math.abs(v) >= 1e6) return symbol + (v/1e6).toFixed(1) + 'M';
+    if(Math.abs(v) >= 1e3) return symbol + Math.round(v/1e3) + 'K';
+    return symbol + Math.round(v);
+  }};
+
+  // 1. Timeline chart — bubbles sized by amount
+  const tcanvas = document.getElementById('projTimelineChart');
+  if(tcanvas){{
+    if(projTimelineInst){{ projTimelineInst.destroy(); projTimelineInst = null; }}
+    const bubbleData = cashouts.map(co => ({{
+      x: co.year,
+      y: conv(co.amount_usd * FX_USDPHP),
+      r: Math.max(5, Math.min(35, Math.sqrt(co.amount_usd) / 8)),
+      item: co.item,
+      category: co.category,
+    }}));
+    projTimelineInst = new Chart(tcanvas.getContext('2d'), {{
+      type: 'bubble',
+      data: {{datasets: [{{label: 'Cashouts', data: bubbleData, backgroundColor: 'rgba(124,58,237,.55)', borderColor: '#7c3aed', borderWidth: 1.5}}]}},
+      options: {{
+        responsive: true, maintainAspectRatio: false, animation: {{duration: 250}},
+        plugins: {{
+          legend: {{display: false}},
+          tooltip: {{
+            backgroundColor: 'rgba(255,255,255,.98)', borderColor: '#d1d5db', borderWidth: .5,
+            titleColor: '#111827', bodyColor: '#374151',
+            titleFont: {{size: 10, family: 'monospace'}}, bodyFont: {{size: 10, family: 'monospace'}},
+            callbacks: {{
+              title(i){{ return i[0].raw.item + ' (' + i[0].raw.year + ')'; }},
+              label(i){{ return ' ' + fmtBig(i.raw.y) + ' · ' + i.raw.category; }},
+            }}
+          }}
+        }},
+        scales: {{
+          x: {{type: 'linear', ticks: {{color: '#9ca3af', font: {{size: 9, family: 'monospace'}}, stepSize: 1, callback: v => v}}, grid: {{color: '#f3f4f6'}}, min: proj[0].year - 0.5, max: proj[proj.length-1].year + 0.5}},
+          y: {{ticks: {{color: '#9ca3af', font: {{size: 9, family: 'monospace'}}, callback: fmtBig}}, grid: {{color: '#f3f4f6'}}}}
+        }}
+      }}
+    }});
+  }}
+
+  // 2. 15-year net worth projection
+  const ncanvas = document.getElementById('projNWChart');
+  if(ncanvas){{
+    if(projNWInst){{ projNWInst.destroy(); projNWInst = null; }}
+
+    // Compute "no cashouts" reference line
+    const startingNw = a.starting_nw_php;
+    const incReturn = a.investment_return_pct / 100;
+    const salaryGrowth = a.salary_growth_pct / 100;
+    const expenseInfl = a.expense_inflation_pct / 100;
+    const startIncome = DATA.cashflow_summary?.summary?.income_php || 0;
+    const startExpense = DATA.cashflow_summary?.summary?.expense_php || 0;
+
+    const noCashoutSeries = [];
+    let nw_nc = startingNw;
+    for(let i = 0; i < proj.length; i++){{
+      const inc = startIncome * Math.pow(1 + salaryGrowth, i);
+      const exp = startExpense * Math.pow(1 + expenseInfl, i);
+      const gains = nw_nc * incReturn;
+      nw_nc = nw_nc + (inc - exp) + gains;
+      noCashoutSeries.push({{x: proj[i].year, y: conv(nw_nc)}});
+    }}
+
+    const nwSeries = proj.map(p => ({{x: p.year, y: conv(p.net_worth_php)}}));
+
+    projNWInst = new Chart(ncanvas.getContext('2d'), {{
+      type: 'line',
+      data: {{
+        datasets: [
+          {{label: 'Net Worth (with cashouts)', data: nwSeries, borderColor: '#7c3aed', backgroundColor: 'rgba(124,58,237,.08)', borderWidth: 2.5, pointRadius: 3, tension: .15, fill: true}},
+          {{label: 'Without cashouts', data: noCashoutSeries, borderColor: 'rgba(124,58,237,.45)', backgroundColor: 'transparent', borderWidth: 1.5, pointRadius: 0, borderDash: [5,4], tension: .15}}
+        ]
+      }},
+      options: {{
+        responsive: true, maintainAspectRatio: false, animation: {{duration: 250}},
+        interaction: {{mode: 'index', intersect: false}},
+        plugins: {{
+          legend: {{display: false}},
+          tooltip: {{
+            backgroundColor: 'rgba(255,255,255,.98)', borderColor: '#d1d5db', borderWidth: .5,
+            titleColor: '#111827', bodyColor: '#374151',
+            titleFont: {{size: 10, family: 'monospace'}}, bodyFont: {{size: 10, family: 'monospace'}},
+            callbacks: {{
+              title(i){{ return 'Year ' + i[0].raw.x; }},
+              label(i){{ return ' ' + i.dataset.label + ': ' + fmtBig(i.raw.y); }},
+            }}
+          }}
+        }},
+        scales: {{
+          x: {{type: 'linear', ticks: {{color: '#9ca3af', font: {{size: 9, family: 'monospace'}}, stepSize: 1, callback: v => v}}, grid: {{color: '#f3f4f6'}}}},
+          y: {{ticks: {{color: '#9ca3af', font: {{size: 9, family: 'monospace'}}, callback: fmtBig}}, grid: {{color: '#f3f4f6'}}, title: {{display: true, text: 'Net Worth (' + symbol + ')', color: '#9ca3af', font: {{size: 9, family: 'monospace'}}}}}}
+        }}
+      }}
+    }});
+  }}
 }}
 
 // ── YIELD CURVE CHART ───────────────────────────────────────────────────────
