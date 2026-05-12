@@ -2,7 +2,7 @@
   "_meta": {
     "schema_version": "1.0",
     "last_updated": "2026-05-12",
-    "last_trade_notes": "v3 strategy deployment complete: MSFT 25→45, NVDA 50→110, SPYL 2065→3158, opened SGOV 45sh. Cash drained to $340."
+    "last_trade_notes": "v3.2.1 balance sheet expansion: added CITI_RETIREMENT (leftover 401k contribution from last Citi paycheck)."
   },
 
   "accounts": {
@@ -41,6 +41,13 @@
       "META": {"shares": 12, "avg_cost": 154.14},
       "VOO":  {"shares": 7,  "avg_cost": 388.45},
       "CASH": 737.30
+    },
+
+    "CITI_RETIREMENT": {
+      "classification": "LEGACY",
+      "label": "Citi Retirement Plan",
+      "_note": "Leftover 401k contribution from last Citi paycheck. New finding May 2026.",
+      "CASH": 4289.97
     },
 
     "CRYPTO": {
