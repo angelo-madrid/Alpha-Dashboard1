@@ -6,6 +6,16 @@
 #   PAIRS WITH: refresh.yml v2.3.1+
 #   STRATEGY  : Bogle/Buffett anchored, Mag6-dominant, Active vs Legacy split
 #   CHANGELOG :
+#     3.0.9 — SPYL price calibration (May 12):
+#             • Updated SPYL_RATIO from 0.0241 → 0.02477.
+#             • Calibrated against actual IBKR SPYL.L quote ($18.31).
+#             • Removes the ~2.75% gap between dashboard and IBKR portfolio value.
+#             • Note: ratio drifts ~1.3-1.5%/year as SPYL accumulates dividends
+#                vs distributing SPY. Annual recalibration recommended.
+#     3.0.8 — SGOV live price fetch (May 12):
+#             • Added SGOV to ALL_TICKERS list so it fetches live price from
+#                Twelve Data instead of falling back to avg_cost placeholder.
+#             • Resolves "⚠ no price for SGOV (IBKR)" warning in logs.
 #     3.0.7 — Holdings externalized to holdings.json (May 11):
 #             • HOLDINGS dict moved to holdings.json — edit there after trades.
 #             • Script loads positions at runtime via _load_holdings().
@@ -93,8 +103,8 @@
 #     2.3.3 — Pre-populated FV_OVERLAY with May 2026 consensus.
 #     2.3.0 — Twelve Data + FRED migration.
 # ═════════════════════════════════════════════════════════════════════════════
-SCRIPT_VERSION = "3.0.7"
-SCRIPT_DATE    = "2026-05-11"  # v3.0.7 patch
+SCRIPT_VERSION = "3.0.9"
+SCRIPT_DATE    = "2026-05-12"
 
 """
 generate_dashboard.py — Alpha Dashboard v3
@@ -567,7 +577,7 @@ VOLS     = {"SPYL": 0.16, "MAG6": 0.25, "PORTFOLIO": 0.20}
 
 # Tickers fetched for chart history + holdings valuation
 # Note: TSLA dropped from active strategy; not fetched.
-ALL_TICKERS = ["NVDA","MSFT","META","GOOGL","AMZN","AAPL","SPY","VOO","GOOG","BTC-USD"]
+ALL_TICKERS = ["NVDA","MSFT","META","GOOGL","AMZN","AAPL","SPY","VOO","GOOG","BTC-USD","SGOV"]
 # ─────────────────────────────────────────────────────────────────────────────
 # DATA FETCH
 # ─────────────────────────────────────────────────────────────────────────────
@@ -595,9 +605,16 @@ if not prices:
                 "AAPL":220,"VOO":620,"GOOG":175,"BTC":95000}.get(t, 100)
         prices[t] = pd.Series([base * (1 + 0.0003*i) for i in range(len(fb_dates))], index=fb_dates)
 
-# ── SPYL Proxy: SPYL = SPY × 0.0241 ──────────────────────────────────────────
-# SPYL.L (London-listed SPDR S&P 500 UCITS ETF) is Twelve Data Grow-tier only.
-SPYL_RATIO = 0.0241
+# ── SPYL Proxy: SPYL = SPY × 0.02477 ─────────────────────────────────────────
+# SPYL.L (London-listed SPDR S&P 500 UCITS ETF) is Twelve Data Grow-tier only,
+# so we synthesize from SPY US. Calibrated 2026-05-12 against IBKR SPYL.L quote:
+#   SPY $739.30 × 0.02477 → SPYL $18.31 (matches IBKR exactly)
+#
+# IMPORTANT: SPYL is *accumulating* (reinvests dividends), SPY is *distributing*.
+# This means SPYL grows ~1.3-1.5%/year faster than SPY long-term. Review and
+# recalibrate this ratio annually (or when IBKR vs dashboard SPYL price drifts >2%).
+#   To recalibrate: new_ratio = (current SPYL.L price) / (current SPY price)
+SPYL_RATIO = 0.02477  # calibrated 2026-05-12
 if "SPY" in prices and "SPYL" not in prices:
     prices["SPYL"] = prices["SPY"] * SPYL_RATIO
     print(f"  SPYL: synthesized from SPY × {SPYL_RATIO} → ${prices['SPYL'].iloc[-1]:.2f}")
