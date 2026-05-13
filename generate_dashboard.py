@@ -1,11 +1,21 @@
 # ═════════════════════════════════════════════════════════════════════════════
 # ALPHA DASHBOARD — generate_dashboard.py
 # ═════════════════════════════════════════════════════════════════════════════
-#   VERSION   : 3.4.0
-#   DATE      : 2026-05-12
+#   VERSION   : 3.4.1
+#   DATE      : 2026-05-13
 #   PAIRS WITH: refresh.yml v3.0.8+, holdings.json v1.0+, Google Sheets (4 tabs)
 #   STRATEGY  : Bogle/Buffett anchored, Mag6-dominant, Active vs Legacy split
 #   CHANGELOG :
+#     3.4.1 — CRITICAL HOTFIX (May 13):
+#             • Restored function setYCTab() declaration that was eaten by
+#                an earlier str_replace edit, leaving an orphan function body.
+#             • This was throwing a SyntaxError on page load, breaking ALL
+#                JavaScript including switchMainTab() — so no tabs worked.
+#             • Bug shipped in v3.4.0; affected anyone trying to navigate
+#                from the default Investment Dashboard tab to any other tab.
+#             • Also: file write now forces utf-8 encoding to fix mangled
+#                ₱ peso signs and em-dashes in deployed HTML (showed as
+#                "â±" and "â" garbage on the live site).
 #     3.4.0 — Major Cashouts tab + scenario toggle (Phase 4, May 12):
 #             • New "Major Cashouts" tab between Cashflow and Projection.
 #             • Scenario toggle (us_private / us_public / ph_with_masters)
@@ -196,8 +206,8 @@
 #     2.3.3 — Pre-populated FV_OVERLAY with May 2026 consensus.
 #     2.3.0 — Twelve Data + FRED migration.
 # ═════════════════════════════════════════════════════════════════════════════
-SCRIPT_VERSION = "3.4.0"
-SCRIPT_DATE    = "2026-05-12"
+SCRIPT_VERSION = "3.4.1"
+SCRIPT_DATE    = "2026-05-13"
 
 """
 generate_dashboard.py — Alpha Dashboard v3
@@ -4200,7 +4210,9 @@ function restoreScenario(){{
   }}
 }}
 
-
+// ── YIELD CURVE CHART ───────────────────────────────────────────────────────
+function setYCTab(h){{
+  curYCTab=h;
   document.querySelectorAll('.yc-tab').forEach(b=>b.classList.toggle('on',b.textContent.trim()===h+' / '+h||b.textContent.trim()===h));
   renderYC();
 }}
@@ -4511,7 +4523,7 @@ restoreScenario();
 </html>"""
 
 out_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "index.html")
-with open(out_path, "w") as f:
+with open(out_path, "w", encoding="utf-8") as f:
     f.write(html)
 
 print(f"\n✓ Saved: {out_path}")
