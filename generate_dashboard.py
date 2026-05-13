@@ -1,11 +1,32 @@
 # ═════════════════════════════════════════════════════════════════════════════
 # ALPHA DASHBOARD — generate_dashboard.py
 # ═════════════════════════════════════════════════════════════════════════════
-#   VERSION   : 3.3.0
+#   VERSION   : 3.4.0
 #   DATE      : 2026-05-12
 #   PAIRS WITH: refresh.yml v3.0.8+, holdings.json v1.0+, Google Sheets (4 tabs)
 #   STRATEGY  : Bogle/Buffett anchored, Mag6-dominant, Active vs Legacy split
 #   CHANGELOG :
+#     3.4.0 — Major Cashouts tab + scenario toggle (Phase 4, May 12):
+#             • New "Major Cashouts" tab between Cashflow and Projection.
+#             • Scenario toggle (us_private / us_public / ph_with_masters)
+#                drives per-scenario summary, table, and impact chart.
+#                Selection persists in localStorage across sessions.
+#             • Sheet schema extended: Major_Cashouts now has `Scenario`
+#                column. Rows tagged 'base' apply to all scenarios; education
+#                rows tagged with a specific scenario.
+#             • _build_projection() refactored to compute net worth
+#                trajectory PER scenario (projections_by_scenario dict).
+#                Plus a '__base_only__' reference (no education at all).
+#             • Tab content: (1) scenario summary cards with category +
+#                decade totals, (2) full cashout table for active scenario,
+#                (3) impact chart overlaying all 3 scenarios + reference line.
+#             • "Edit in Sheet" deep-link buttons → opens Major_Cashouts tab.
+#             • Empty state with template guidance when Sheet is unpopulated.
+#             • Projection horizon auto-extends if cashouts go past default
+#                15-yr window (e.g. ph_with_masters has masters in 2052).
+#             • Projection tab's NW chart now honors active scenario from
+#                Major Cashouts toggle — switch scenario there, projection
+#                chart updates next time it's viewed.
 #     3.3.0 — Cashflow + Projection tabs (Phase 2/3, May 12):
 #             • Cashflow tab: 3 stacked sections — Annual Summary (3 cards:
 #                cash surplus, total wealth growth incl. unrealized gains,
@@ -175,7 +196,7 @@
 #     2.3.3 — Pre-populated FV_OVERLAY with May 2026 consensus.
 #     2.3.0 — Twelve Data + FRED migration.
 # ═════════════════════════════════════════════════════════════════════════════
-SCRIPT_VERSION = "3.3.0"
+SCRIPT_VERSION = "3.4.0"
 SCRIPT_DATE    = "2026-05-12"
 
 """
@@ -655,8 +676,12 @@ def _parse_cashflow_rows(rows):
     return items
 
 def _parse_major_cashouts_rows(rows):
-    """Convert Major_Cashouts sheet rows → list for Phase 3.
-    Sheet columns: Year, Item, Amount_USD, Category, Notes"""
+    """Convert Major_Cashouts sheet rows → list for Phase 3/4.
+    Sheet columns: Year, Item, Amount_USD, Category, Scenario, Notes
+    Scenario column added in v3.4.0:
+      - 'base' = always applies (vehicles, real estate, healthcare)
+      - 'us_private' / 'us_public' / 'ph_with_masters' = education scenarios
+      - blank or unknown = treated as 'base' for backward compat"""
     items = []
     for row in rows:
         try:
@@ -669,11 +694,15 @@ def _parse_major_cashouts_rows(rows):
             amount = float((row.get("Amount_USD") or "0").replace(",", ""))
         except ValueError:
             amount = 0.0
+        scenario = (row.get("Scenario") or "base").strip().lower()
+        if not scenario:
+            scenario = "base"
         items.append({
             "year": year,
             "item": (row.get("Item") or "").strip(),
             "amount_usd": amount,
             "category": (row.get("Category") or "").strip(),
+            "scenario": scenario,
             "note": (row.get("Notes") or "").strip(),
         })
     return sorted(items, key=lambda r: (r["year"], -r["amount_usd"]))
@@ -2102,7 +2131,18 @@ else:
 #   - projection_years: how many years to project (default 15)
 
 def _build_projection():
-    """Construct major cashouts table + 15-year net worth projection."""
+    """Construct major cashouts table + per-scenario 15-year net worth projection.
+
+    Scenarios (v3.4.0):
+      Cashouts are tagged with a `scenario` field in the Sheet:
+        - 'base'             → always applied (vehicles, real estate, healthcare)
+        - 'us_private'       → all 4 kids US private undergrad (base case)
+        - 'us_public'        → all 4 kids US public undergrad
+        - 'ph_with_masters'  → all 4 kids Manila undergrad + masters abroad later
+
+      For each toggle-able scenario we compute a separate projection series.
+      `base` items are always included regardless of toggle.
+    """
     cashouts = CASHFLOW_DATA.get("major_cashouts", [])
     settings = CASHFLOW_DATA.get("settings", {})
     cf_summary = cashflow_summary["summary"]
@@ -2119,47 +2159,111 @@ def _build_projection():
 
     current_year = datetime.today().year
 
-    # Aggregate cashouts by year for the projection model (convert USD → PHP)
-    cashouts_by_year = {}
+    # Auto-extend horizon if cashouts go past the default window.
+    # E.g. ph_with_masters has Anul's masters in 2052; we'd want to model through then.
+    if cashouts:
+        max_cashout_year = max(co["year"] for co in cashouts)
+        years_to_max = max_cashout_year - current_year
+        if years_to_max > proj_years:
+            proj_years = years_to_max + 2   # extra buffer past last cashout
+            print(f"  ℹ Projection horizon auto-extended to {proj_years}yr to cover cashouts through {max_cashout_year}")
+
+    # Discover unique scenario tags + classify each
+    BASE_TAG = "base"
+    scenario_tags = sorted(set(co["scenario"] for co in cashouts))
+    toggle_scenarios = [s for s in scenario_tags if s != BASE_TAG]
+    if not toggle_scenarios:
+        # Empty Sheet or only base items — show one "base" scenario anyway
+        toggle_scenarios = [BASE_TAG]
+
+    # Friendly labels for each scenario (used by dashboard toggle)
+    SCENARIO_LABELS = {
+        "base":             "Base only",
+        "us_private":       "US Private (base case)",
+        "us_public":        "US Public",
+        "ph_with_masters":  "Manila + Masters",
+    }
+
+    def _project_for_scenarios(active_scenarios):
+        """Run the year-by-year compounding model for a given set of active scenarios.
+        Base items always count; toggle scenarios only count if in active_scenarios."""
+        # Aggregate cashouts by year, filtered by scenario membership
+        cashouts_by_year = {}
+        for co in cashouts:
+            sc = co["scenario"]
+            if sc != BASE_TAG and sc not in active_scenarios:
+                continue
+            yr = co["year"]
+            amt_php = co.get("amount_usd", 0) * USDPHP_RATE
+            cashouts_by_year[yr] = cashouts_by_year.get(yr, 0) + amt_php
+
+        projection = []
+        nw_php = starting_nw_php
+        running_total = 0.0
+        for i in range(proj_years + 1):
+            yr = current_year + i
+            income_yr = starting_income * ((1 + salary_growth) ** i)
+            expense_yr = starting_expense * ((1 + expense_infl) ** i)
+            surplus_yr = income_yr - expense_yr
+            gains_yr = nw_php * inv_return
+            cashout_yr = cashouts_by_year.get(yr, 0)
+            running_total += cashout_yr
+            nw_php = nw_php + surplus_yr + gains_yr - cashout_yr
+            projection.append({
+                "year": yr, "year_index": i,
+                "income_php": income_yr, "expense_php": expense_yr,
+                "surplus_php": surplus_yr, "gains_php": gains_yr,
+                "cashout_php": cashout_yr,
+                "net_worth_php": nw_php,
+                "running_cashout_php": running_total,
+            })
+        return projection
+
+    # Build projection series for each scenario (base only, plus each toggle scenario)
+    projections_by_scenario = {}
+    for sc in toggle_scenarios:
+        projections_by_scenario[sc] = _project_for_scenarios({sc})
+    # Also include a "base only" series (no education) for comparison
+    projections_by_scenario["__base_only__"] = _project_for_scenarios(set())
+
+    # Default scenario for initial render: us_private if available, else first toggle
+    default_scenario = "us_private" if "us_private" in toggle_scenarios else toggle_scenarios[0]
+
+    # Cashouts grouped by scenario (for tab rendering)
+    cashouts_by_scenario = {}
     for co in cashouts:
-        yr = co["year"]
-        amt_usd = co.get("amount_usd", 0)
-        amt_php = amt_usd * USDPHP_RATE
-        cashouts_by_year[yr] = cashouts_by_year.get(yr, 0) + amt_php
+        cashouts_by_scenario.setdefault(co["scenario"], []).append(co)
 
-    # Year-by-year projection
-    projection = []
-    nw_php = starting_nw_php
-    running_total_cashout = 0.0
-    for i in range(proj_years + 1):
-        yr = current_year + i
-        income_yr = starting_income * ((1 + salary_growth) ** i)
-        expense_yr = starting_expense * ((1 + expense_infl) ** i)
-        surplus_yr = income_yr - expense_yr
-        # Investment growth applied to start-of-year balance
-        gains_yr = nw_php * inv_return
-        # Major cashout this year (if any)
-        cashout_yr = cashouts_by_year.get(yr, 0)
-        running_total_cashout += cashout_yr
-        # End of year net worth
-        nw_php = nw_php + surplus_yr + gains_yr - cashout_yr
+    # Category totals (used by Major Cashouts tab summary cards)
+    def _category_totals(active_scenarios):
+        totals = {}
+        for co in cashouts:
+            sc = co["scenario"]
+            if sc != BASE_TAG and sc not in active_scenarios:
+                continue
+            cat = co.get("category") or "Uncategorized"
+            totals[cat] = totals.get(cat, 0) + co.get("amount_usd", 0)
+        return totals
 
-        projection.append({
-            "year": yr,
-            "year_index": i,
-            "income_php": income_yr,
-            "expense_php": expense_yr,
-            "surplus_php": surplus_yr,
-            "gains_php": gains_yr,
-            "cashout_php": cashout_yr,
-            "net_worth_php": nw_php,
-            "running_cashout_php": running_total_cashout,
-        })
+    category_totals_by_scenario = {
+        sc: _category_totals({sc}) for sc in toggle_scenarios
+    }
+
+    # For backward compat (Projection tab existing code), also expose the
+    # "default" projection at the top level
+    default_projection = projections_by_scenario.get(default_scenario, [])
 
     return {
         "has_cashout_data": len(cashouts) > 0,
         "cashouts": cashouts,
-        "projection": projection,
+        "cashouts_by_scenario": cashouts_by_scenario,
+        "scenarios": toggle_scenarios,
+        "scenario_labels": {sc: SCENARIO_LABELS.get(sc, sc.replace("_", " ").title())
+                            for sc in toggle_scenarios + ["__base_only__"]},
+        "default_scenario": default_scenario,
+        "projections_by_scenario": projections_by_scenario,
+        "category_totals_by_scenario": category_totals_by_scenario,
+        "projection": default_projection,   # backward compat
         "assumptions": {
             "salary_growth_pct": salary_growth * 100,
             "expense_inflation_pct": expense_infl * 100,
@@ -2172,14 +2276,23 @@ def _build_projection():
     }
 
 projection_data = _build_projection()
-print(f"\n── Projection (Phase 3) ──")
+print(f"\n── Projection (Phase 3/4) ──")
 print(f"  Years projected   : {projection_data['assumptions']['projection_years']}")
 print(f"  Starting NW       : ₱{projection_data['assumptions']['starting_nw_php']:,.0f}")
 print(f"  Major cashouts    : {len(projection_data['cashouts'])} items"
       + (" (Sheet empty — populate Major_Cashouts tab)" if not projection_data["has_cashout_data"] else ""))
+if projection_data["scenarios"]:
+    print(f"  Scenarios         : {', '.join(projection_data['scenarios'])} (default: {projection_data['default_scenario']})")
+    for sc in projection_data["scenarios"]:
+        sc_proj = projection_data["projections_by_scenario"][sc]
+        if sc_proj:
+            final = sc_proj[-1]
+            sc_total = sum(co["amount_usd"] for co in projection_data["cashouts_by_scenario"].get(sc, []))
+            print(f"    {sc:20s} → Year {final['year']} NW: ₱{final['net_worth_php']:,.0f} "
+                  f"(scenario total cashouts: ${sc_total:,.0f})")
 if projection_data["projection"]:
     final = projection_data["projection"][-1]
-    print(f"  Year {final['year']} NW       : ₱{final['net_worth_php']:,.0f}")
+    print(f"  Default scenario  : Year {final['year']} NW: ₱{final['net_worth_php']:,.0f}")
 
 # ── JSON PAYLOAD ──────────────────────────────────────────────────────────────
 payload = json.dumps({
@@ -2720,6 +2833,189 @@ def _build_projection_tab_html():
 
 projection_tab_html = _build_projection_tab_html()
 
+# ── Major Cashouts tab HTML (Phase 4) ──
+# Three sections + scenario toggle:
+#   1. Scenario toggle (US Private / US Public / Manila + Masters)
+#   2. Summary cards (total cashouts, by category, by decade)
+#   3. Filterable table (all rows for active scenario + base)
+#   4. "Edit in Sheet" button (deep link)
+def _build_cashouts_tab_html():
+    pd_ = projection_data
+    has_co = pd_["has_cashout_data"]
+    rate = USDPHP_RATE
+
+    # Currency toggle header (consistent with other tabs)
+    header_html = f"""
+    <div class="bs-header-row">
+      <div class="bs-fx-info">
+        <span class="bs-fx-label">FX Rate:</span>
+        <span class="bs-fx-rate">₱{rate:.4f} / $1</span>
+      </div>
+      <div class="bs-currency-toggle">
+        <button class="bs-ccy-btn active" data-ccy="USD" onclick="switchCurrency('USD')">USD ($)</button>
+        <button class="bs-ccy-btn" data-ccy="PHP" onclick="switchCurrency('PHP')">PHP (₱)</button>
+      </div>
+    </div>"""
+
+    if not has_co:
+        # Empty state — Sheet not populated yet
+        sheet_url = "https://docs.google.com/spreadsheets/d/1Kal6N5jcJz3wUfBhxvkIS1YMm5ToEz4CI6tsZPZSZG4"
+        return header_html + f"""
+    <div class="bs-section">
+      <div class="cf-empty">
+        <div class="cf-empty-icon">📋</div>
+        <div class="cf-empty-title">Major Cashouts tab — waiting for Sheet data</div>
+        <div class="cf-empty-msg">Populate the <code>Major_Cashouts</code> tab of your Google Sheet with future large expenses.<br/>
+        Columns: <code>Year</code> · <code>Item</code> · <code>Amount_USD</code> · <code>Category</code> · <code>Scenario</code> · <code>Notes</code></div>
+        <a href="{sheet_url}" target="_blank" class="cf-btn cf-btn-primary" style="margin-top:14px">Open Sheet to Edit</a>
+      </div>
+    </div>"""
+
+    # Scenario tabs + "Edit in Sheet" button
+    scenario_labels = pd_["scenario_labels"]
+    default_sc = pd_["default_scenario"]
+    sheet_url = "https://docs.google.com/spreadsheets/d/1Kal6N5jcJz3wUfBhxvkIS1YMm5ToEz4CI6tsZPZSZG4/edit#gid=2138882399"
+    scenario_btns = "".join([
+        f'<button class="co-sc-btn{" active" if sc == default_sc else ""}" data-scenario="{sc}" onclick="switchScenario(\'{sc}\')">{scenario_labels[sc]}</button>'
+        for sc in pd_["scenarios"]
+    ])
+
+    toolbar_html = f"""
+    <div class="co-toolbar">
+      <div class="co-sc-toggle">
+        <span class="co-sc-label">SCENARIO:</span>{scenario_btns}
+      </div>
+      <a href="{sheet_url}" target="_blank" class="cf-btn">+ Edit in Sheet</a>
+    </div>"""
+
+    # Build per-scenario summary cards
+    # We render ALL scenarios but only show one at a time via JS class toggling
+    summary_cards = ""
+    for sc in pd_["scenarios"]:
+        cat_totals = pd_["category_totals_by_scenario"][sc]
+        sc_cashouts = pd_["cashouts_by_scenario"].get(sc, [])
+        base_cashouts = pd_["cashouts_by_scenario"].get("base", [])
+        total_usd = sum(co["amount_usd"] for co in sc_cashouts) + sum(co["amount_usd"] for co in base_cashouts)
+        total_php = total_usd * rate
+
+        # Category cards
+        cat_cards = ""
+        for cat, amt_usd in sorted(cat_totals.items(), key=lambda x: -x[1]):
+            amt_php = amt_usd * rate
+            pct = (amt_usd / total_usd * 100) if total_usd > 0 else 0
+            cat_cards += f"""
+        <div class="co-cat-card">
+          <div class="co-cat-name">{cat}</div>
+          <div class="co-cat-amt" data-php="{amt_php:.2f}" data-usd="{amt_usd:.2f}">${amt_usd:,.0f}</div>
+          <div class="co-cat-pct">{pct:.0f}% of total</div>
+        </div>"""
+
+        # By-decade summary
+        decade_totals = {}
+        for co in sc_cashouts + base_cashouts:
+            decade = (co["year"] // 10) * 10
+            decade_totals[decade] = decade_totals.get(decade, 0) + co["amount_usd"]
+        decade_cards = ""
+        for dec, amt_usd in sorted(decade_totals.items()):
+            amt_php = amt_usd * rate
+            decade_cards += f"""
+        <div class="co-dec-card">
+          <div class="co-dec-name">{dec}s</div>
+          <div class="co-dec-amt" data-php="{amt_php:.2f}" data-usd="{amt_usd:.2f}">${amt_usd:,.0f}</div>
+        </div>"""
+
+        summary_cards += f"""
+      <div class="co-summary-block co-sc-content" data-scenario="{sc}" style="{'display:block' if sc == default_sc else 'display:none'}">
+        <div class="co-headline-row">
+          <div class="co-headline-card">
+            <div class="co-headline-label">TOTAL CASHOUTS · {scenario_labels[sc]}</div>
+            <div class="co-headline-value" data-php="{total_php:.2f}" data-usd="{total_usd:.2f}">${total_usd:,.0f}</div>
+            <div class="co-headline-sub">{len(sc_cashouts) + len(base_cashouts)} items across {pd_["assumptions"]["projection_years"]+1} years</div>
+          </div>
+        </div>
+
+        <div class="co-subhd">BY CATEGORY</div>
+        <div class="co-cat-grid">{cat_cards}
+        </div>
+
+        <div class="co-subhd" style="margin-top:18px">BY DECADE</div>
+        <div class="co-dec-grid">{decade_cards}
+        </div>
+      </div>"""
+
+    summary_html = f"""
+    <div class="bs-section">
+      <div class="section-hd">
+        <span>1 · SCENARIO SUMMARY</span>
+        <span style="font-size:9px;color:var(--mut)">Base items always counted · Education varies by scenario</span>
+      </div>{summary_cards}
+    </div>"""
+
+    # Build per-scenario tables
+    table_blocks = ""
+    for sc in pd_["scenarios"]:
+        sc_cashouts = pd_["cashouts_by_scenario"].get(sc, [])
+        base_cashouts = pd_["cashouts_by_scenario"].get("base", [])
+        combined = sorted(sc_cashouts + base_cashouts, key=lambda r: (r["year"], -r["amount_usd"]))
+
+        rows_html = ""
+        for co in combined:
+            amt_usd = co["amount_usd"]
+            amt_php = amt_usd * rate
+            sc_label = "base" if co["scenario"] == "base" else co["scenario"]
+            sc_class = "co-tag-base" if co["scenario"] == "base" else "co-tag-scenario"
+            note = co.get("note", "") or "—"
+            rows_html += f"""
+          <tr>
+            <td><strong>{co['year']}</strong></td>
+            <td>{co['item']}</td>
+            <td class="cf-num"><span data-php="{amt_php:.2f}" data-usd="{amt_usd:.2f}">${amt_usd:,.0f}</span></td>
+            <td><span class="co-cat-tag">{co['category']}</span></td>
+            <td><span class="co-tag {sc_class}">{sc_label}</span></td>
+            <td class="co-note">{note}</td>
+          </tr>"""
+
+        table_blocks += f"""
+      <div class="co-sc-content" data-scenario="{sc}" style="{'display:block' if sc == default_sc else 'display:none'}">
+        <table class="cf-table">
+          <thead>
+            <tr>
+              <th>Year</th>
+              <th>Item</th>
+              <th class="cf-num">Amount</th>
+              <th>Category</th>
+              <th>Scenario</th>
+              <th>Notes</th>
+            </tr>
+          </thead>
+          <tbody>{rows_html}
+          </tbody>
+        </table>
+      </div>"""
+
+    table_html = f"""
+    <div class="bs-section">
+      <div class="section-hd">
+        <span>2 · CASHOUT DETAIL</span>
+        <span style="font-size:9px;color:var(--mut)">All items in active scenario · Sorted by year</span>
+      </div>{table_blocks}
+    </div>"""
+
+    # Build per-scenario impact chart
+    impact_html = """
+    <div class="bs-section">
+      <div class="section-hd">
+        <span>3 · NET WORTH IMPACT</span>
+        <span style="font-size:9px;color:var(--mut)">All three scenarios overlaid · Toggle above shifts emphasis</span>
+      </div>
+      <div class="cf-chart-wrap" style="height:340px"><canvas id="coImpactChart" role="img" aria-label="Net worth impact by scenario"></canvas></div>
+      <div class="cf-legend" id="coImpactLegend"></div>
+    </div>"""
+
+    return header_html + toolbar_html + summary_html + table_html + impact_html
+
+cashouts_tab_html = _build_cashouts_tab_html()
+
 html = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -3035,6 +3331,58 @@ hr{{border:none;border-top:.5px solid var(--bdr);margin:24px 0 12px}}
   .cf-table th:nth-child(5),.cf-table td:nth-child(5){{display:none}}
 }}
 
+/* ═══════════════════════════════════════════════════════════════════════════
+   MAJOR CASHOUTS TAB — Phase 4
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* Toolbar with scenario toggle + edit button */
+.co-toolbar{{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:18px;padding:12px 16px;background:var(--surf);border:.5px solid var(--bdr);border-radius:6px}}
+.co-sc-toggle{{display:flex;align-items:center;gap:6px;flex-wrap:wrap}}
+.co-sc-label{{font-size:9px;letter-spacing:.12em;color:var(--mut);margin-right:6px}}
+.co-sc-btn{{background:transparent;border:1px solid var(--bdr);padding:6px 12px;font-family:'DM Mono',monospace;font-size:10.5px;font-weight:500;color:var(--mut);cursor:pointer;border-radius:4px;transition:all .15s}}
+.co-sc-btn:hover{{color:var(--txt);border-color:var(--bdr2)}}
+.co-sc-btn.active{{background:var(--txt);color:var(--bg);border-color:var(--txt)}}
+
+.cf-btn{{display:inline-block;padding:7px 14px;background:var(--surf2);border:1px solid var(--bdr);border-radius:4px;font-family:'DM Mono',monospace;font-size:10.5px;color:var(--txt);text-decoration:none;cursor:pointer;transition:all .15s;white-space:nowrap}}
+.cf-btn:hover{{background:var(--txt);color:var(--bg);border-color:var(--txt)}}
+.cf-btn-primary{{background:var(--txt);color:var(--bg);border-color:var(--txt)}}
+.cf-btn-primary:hover{{opacity:.85}}
+
+/* Headline + summary */
+.co-headline-row{{margin-bottom:18px}}
+.co-headline-card{{padding:18px 22px;background:linear-gradient(180deg, var(--surf) 0%, var(--surf2) 100%);border:1px solid var(--zone);border-radius:6px}}
+.co-headline-label{{font-size:9px;letter-spacing:.12em;color:var(--mut);margin-bottom:8px}}
+.co-headline-value{{font-family:'Syne',sans-serif;font-size:30px;font-weight:700;color:var(--zone);letter-spacing:-.01em;margin-bottom:4px}}
+.co-headline-sub{{font-size:10px;color:var(--mut)}}
+
+.co-subhd{{font-size:9px;letter-spacing:.12em;text-transform:uppercase;color:var(--mut);margin:14px 0 8px;font-weight:600}}
+
+/* Category grid */
+.co-cat-grid{{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px}}
+.co-cat-card{{background:var(--surf);border:.5px solid var(--bdr);border-radius:5px;padding:10px 12px}}
+.co-cat-name{{font-size:9px;letter-spacing:.08em;text-transform:uppercase;color:var(--mut);margin-bottom:3px}}
+.co-cat-amt{{font-family:'Syne',sans-serif;font-size:17px;font-weight:700;color:var(--txt);line-height:1.1;margin-bottom:2px}}
+.co-cat-pct{{font-size:9px;color:var(--mut)}}
+
+/* Decade grid */
+.co-dec-grid{{display:grid;grid-template-columns:repeat(auto-fit,minmax(100px,1fr));gap:6px}}
+.co-dec-card{{background:var(--surf2);border:.5px solid var(--bdr);border-radius:4px;padding:8px 10px;text-align:center}}
+.co-dec-name{{font-size:9px;letter-spacing:.08em;color:var(--mut);margin-bottom:2px}}
+.co-dec-amt{{font-family:'DM Mono',monospace;font-size:13px;font-weight:600;color:var(--txt)}}
+
+/* Tags */
+.co-cat-tag{{font-size:9px;padding:2px 7px;background:var(--surf2);border-radius:10px;color:var(--mut);letter-spacing:.04em}}
+.co-tag{{font-size:9px;padding:2px 7px;border-radius:10px;letter-spacing:.04em}}
+.co-tag-base{{background:#fef3c7;color:#92400e}}
+.co-tag-scenario{{background:#dbeafe;color:#1e40af}}
+.co-note{{font-size:10px;color:var(--mut);max-width:280px}}
+
+@media(max-width:780px){{
+  .co-toolbar{{flex-direction:column;align-items:stretch}}
+  .co-sc-toggle{{justify-content:center}}
+  .co-cat-grid{{grid-template-columns:1fr 1fr}}
+}}
+
 @media(max-width:780px){{
   .bs-headline{{flex-direction:column;gap:6px}}
   .bs-headline-op{{display:none}}
@@ -3081,6 +3429,7 @@ hr{{border:none;border-top:.5px solid var(--bdr);margin:24px 0 12px}}
     <button class="main-tab active" data-tab="investment" onclick="switchMainTab('investment')">Investment Dashboard</button>
     <button class="main-tab" data-tab="holdings" onclick="switchMainTab('holdings')">Total Holdings</button>
     <button class="main-tab" data-tab="cashflow" onclick="switchMainTab('cashflow')">Cashflow</button>
+    <button class="main-tab" data-tab="cashouts" onclick="switchMainTab('cashouts')">Major Cashouts</button>
     <button class="main-tab" data-tab="projection" onclick="switchMainTab('projection')">Projection</button>
   </div>
 
@@ -3391,7 +3740,13 @@ hr{{border:none;border-top:.5px solid var(--bdr);margin:24px 0 12px}}
   </div> <!-- end #tab-cashflow -->
 
   <!-- ═══════════════════════════════════════════════════════════════ -->
-  <!-- TAB 4: PROJECTION (Phase 3)                                     -->
+  <!-- TAB 4: MAJOR CASHOUTS (Phase 4)                                 -->
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <div id="tab-cashouts" class="tab-content">{cashouts_tab_html}
+  </div> <!-- end #tab-cashouts -->
+
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <!-- TAB 5: PROJECTION (Phase 3)                                     -->
   <!-- ═══════════════════════════════════════════════════════════════ -->
   <div id="tab-projection" class="tab-content">{projection_tab_html}
   </div> <!-- end #tab-projection -->
@@ -3436,6 +3791,9 @@ function switchMainTab(tabId){{
   }}
   if(tabId === 'cashflow'){{
     setTimeout(() => {{ renderCashflowChart(); }}, 50);
+  }}
+  if(tabId === 'cashouts'){{
+    setTimeout(() => {{ renderCashoutsImpactChart(); }}, 50);
   }}
   if(tabId === 'projection'){{
     setTimeout(() => {{ renderProjectionCharts(); }}, 50);
@@ -3491,9 +3849,10 @@ function switchCurrency(ccy){{
     const php = parseFloat(el.getAttribute('data-php'));
     if(!isNaN(php)) el.textContent = fmtPhpUsd(php, ccy);
   }});
-  // Re-render charts to reflect new currency (cashflow + projection only)
+  // Re-render charts to reflect new currency (cashflow + projection + cashouts)
   if(typeof renderCashflowChart === 'function') renderCashflowChart();
   if(typeof renderProjectionCharts === 'function') renderProjectionCharts();
+  if(typeof renderCashoutsImpactChart === 'function') renderCashoutsImpactChart();
   // Persist preference
   try {{ localStorage.setItem('dashboard_ccy', ccy); }} catch(e) {{}}
 }}
@@ -3579,8 +3938,16 @@ let projTimelineInst = null;
 let projNWInst = null;
 function renderProjectionCharts(){{
   if(!DATA.projection) return;
-  const proj = DATA.projection.projection;
-  const cashouts = DATA.projection.cashouts;
+  // Honor active scenario from Major Cashouts tab toggle (or default)
+  const activeScenario = curScenario || DATA.projection.default_scenario;
+  const proj = (DATA.projection.projections_by_scenario && activeScenario
+                && DATA.projection.projections_by_scenario[activeScenario])
+               || DATA.projection.projection;
+  // Filter cashouts to active scenario (+ base)
+  const allCashouts = DATA.projection.cashouts || [];
+  const cashouts = allCashouts.filter(co =>
+    co.scenario === 'base' || co.scenario === activeScenario
+  );
   const a = DATA.projection.assumptions;
   const ccy = curCurrency;
   const conv = v => ccy === 'PHP' ? v : v / FX_USDPHP;
@@ -3684,9 +4051,156 @@ function renderProjectionCharts(){{
   }}
 }}
 
-// ── YIELD CURVE CHART ───────────────────────────────────────────────────────
-function setYCTab(h){{
-  curYCTab=h;
+// ── MAJOR CASHOUTS: SCENARIO TOGGLE + IMPACT CHART ──────────────────────────
+let curScenario = null;   // tracks which scenario is currently active
+let coImpactInst = null;
+
+const SCENARIO_COLORS = {{
+  us_private:      '#b91c1c',   // red — most expensive
+  us_public:       '#d97706',   // amber — middle
+  ph_with_masters: '#15803d',   // green — cheapest
+  __base_only__:   '#6b7280',   // gray — reference line, no education
+}};
+
+function switchScenario(sc){{
+  curScenario = sc;
+  // Update button states
+  document.querySelectorAll('.co-sc-btn').forEach(b => {{
+    b.classList.toggle('active', b.dataset.scenario === sc);
+  }});
+  // Show/hide scenario-specific content blocks
+  document.querySelectorAll('.co-sc-content').forEach(el => {{
+    el.style.display = (el.dataset.scenario === sc) ? 'block' : 'none';
+  }});
+  // Re-render currency on newly visible elements
+  document.querySelectorAll('.co-sc-content [data-php]').forEach(el => {{
+    const php = parseFloat(el.getAttribute('data-php'));
+    if(!isNaN(php)) el.textContent = fmtPhpUsd(php, curCurrency);
+  }});
+  // Persist
+  try {{ localStorage.setItem('dashboard_scenario', sc); }} catch(e) {{}}
+  // Re-render impact chart with emphasis on this scenario
+  renderCashoutsImpactChart();
+  // Also re-render Projection tab charts if user later switches to that tab
+  if(typeof renderProjectionCharts === 'function'){{
+    // Only re-render if projection tab is currently visible (avoid wasted work)
+    const projTab = document.getElementById('tab-projection');
+    if(projTab && projTab.classList.contains('active')) renderProjectionCharts();
+  }}
+}}
+
+function renderCashoutsImpactChart(){{
+  if(!DATA.projection) return;
+  const pj = DATA.projection;
+  const scenarios = pj.scenarios || [];
+  if(scenarios.length === 0) return;
+
+  const canvas = document.getElementById('coImpactChart');
+  if(!canvas) return;
+  if(coImpactInst){{ coImpactInst.destroy(); coImpactInst = null; }}
+
+  const ccy = curCurrency;
+  const conv = v => ccy === 'PHP' ? v : v / FX_USDPHP;
+  const symbol = ccy === 'PHP' ? '₱' : '$';
+  const fmtBig = v => {{
+    if(Math.abs(v) >= 1e6) return symbol + (v/1e6).toFixed(1) + 'M';
+    if(Math.abs(v) >= 1e3) return symbol + Math.round(v/1e3) + 'K';
+    return symbol + Math.round(v);
+  }};
+
+  const activeScenario = curScenario || pj.default_scenario;
+  const datasets = [];
+  const labels = pj.scenario_labels || {{}};
+
+  // One line per toggle-able scenario, plus a "no education" reference
+  scenarios.forEach(sc => {{
+    const series = pj.projections_by_scenario[sc];
+    if(!series) return;
+    const isActive = sc === activeScenario;
+    const color = SCENARIO_COLORS[sc] || '#6b7280';
+    datasets.push({{
+      label: labels[sc] || sc,
+      data: series.map(p => ({{x: p.year, y: conv(p.net_worth_php)}})),
+      borderColor: color,
+      backgroundColor: isActive ? color + '22' : 'transparent',
+      borderWidth: isActive ? 2.5 : 1.5,
+      pointRadius: isActive ? 3 : 0,
+      tension: .15,
+      fill: isActive,
+      order: isActive ? 1 : 2,
+      borderDash: isActive ? [] : [],
+    }});
+  }});
+
+  // Add "no education" reference line (gray dashed)
+  const baseOnly = pj.projections_by_scenario['__base_only__'];
+  if(baseOnly){{
+    datasets.push({{
+      label: 'Base only (no education)',
+      data: baseOnly.map(p => ({{x: p.year, y: conv(p.net_worth_php)}})),
+      borderColor: 'rgba(107,114,128,.6)',
+      backgroundColor: 'transparent',
+      borderWidth: 1.2,
+      pointRadius: 0,
+      borderDash: [4, 4],
+      tension: .15,
+      order: 3,
+    }});
+  }}
+
+  coImpactInst = new Chart(canvas.getContext('2d'), {{
+    type: 'line',
+    data: {{datasets}},
+    options: {{
+      responsive: true, maintainAspectRatio: false, animation: {{duration: 250}},
+      interaction: {{mode: 'index', intersect: false}},
+      plugins: {{
+        legend: {{display: false}},
+        tooltip: {{
+          backgroundColor: 'rgba(255,255,255,.98)', borderColor: '#d1d5db', borderWidth: .5,
+          titleColor: '#111827', bodyColor: '#374151',
+          titleFont: {{size: 10, family: 'monospace'}}, bodyFont: {{size: 9, family: 'monospace'}},
+          callbacks: {{
+            title(i){{ return 'Year ' + i[0].raw.x; }},
+            label(i){{ return ' ' + i.dataset.label + ': ' + fmtBig(i.raw.y); }},
+          }}
+        }}
+      }},
+      scales: {{
+        x: {{type: 'linear', ticks: {{color: '#9ca3af', font: {{size: 9, family: 'monospace'}}, stepSize: 2, callback: v => v}}, grid: {{color: '#f3f4f6'}}}},
+        y: {{ticks: {{color: '#9ca3af', font: {{size: 9, family: 'monospace'}}, callback: fmtBig}}, grid: {{color: '#f3f4f6'}}, title: {{display: true, text: 'Net Worth (' + symbol + ')', color: '#9ca3af', font: {{size: 9, family: 'monospace'}}}}}}
+      }}
+    }}
+  }});
+
+  // Custom legend (mirrors scenario colors + active emphasis)
+  const legendEl = document.getElementById('coImpactLegend');
+  if(legendEl){{
+    legendEl.innerHTML = scenarios.map(sc => {{
+      const color = SCENARIO_COLORS[sc] || '#6b7280';
+      const isActive = sc === activeScenario;
+      const weight = isActive ? '600' : '400';
+      return `<div class="cf-li"><div class="cf-ln" style="background:${{color}};height:${{isActive ? 3 : 2}}px"></div><span style="font-weight:${{weight}};color:${{isActive ? 'var(--txt)' : 'var(--mut)'}}">${{labels[sc] || sc}}${{isActive ? ' · active' : ''}}</span></div>`;
+    }}).join('') + `<div class="cf-li"><div class="cf-ln" style="background:rgba(107,114,128,.6);border-top:1.5px dashed rgba(107,114,128,.6)"></div>Base only (no education)</div>`;
+  }}
+}}
+
+function restoreScenario(){{
+  // Read scenario from localStorage if previously set + still valid
+  try {{
+    const saved = localStorage.getItem('dashboard_scenario');
+    if(saved && DATA.projection && DATA.projection.scenarios.includes(saved)){{
+      switchScenario(saved);
+      return;
+    }}
+  }} catch(e) {{}}
+  // Default: us_private if exists, else first scenario
+  if(DATA.projection && DATA.projection.default_scenario){{
+    switchScenario(DATA.projection.default_scenario);
+  }}
+}}
+
+
   document.querySelectorAll('.yc-tab').forEach(b=>b.classList.toggle('on',b.textContent.trim()===h+' / '+h||b.textContent.trim()===h));
   renderYC();
 }}
@@ -3991,6 +4505,7 @@ render();
 renderAllocTable();
 restoreTab();
 restoreCurrency();
+restoreScenario();
 </script>
 </body>
 </html>"""
