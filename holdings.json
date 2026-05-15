@@ -1,8 +1,8 @@
 {
   "_meta": {
     "schema_version": "1.0",
-    "last_updated": "2026-05-12",
-    "last_trade_notes": "v3.2.1 balance sheet expansion: added CITI_RETIREMENT (leftover 401k contribution from last Citi paycheck)."
+    "last_updated": "2026-05-15",
+    "last_trade_notes": "Continued v3 deployment — MSFT 45→60, NVDA 110→141, SGOV 45→78, SPYL 3158→3827. Cash drained to $130."
   },
 
   "accounts": {
@@ -10,12 +10,12 @@
       "classification": "ACTIVE",
       "label": "IBKR",
       "META": {"shares": 18,    "avg_cost": 612.04},
-      "MSFT": {"shares": 45,    "avg_cost": 415.42},
-      "NVDA": {"shares": 110,   "avg_cost": 209.55},
-      "SGOV": {"shares": 45,    "avg_cost": 100.51},
-      "SPYL": {"shares": 3158,  "avg_cost": 17.90},
+      "MSFT": {"shares": 60,    "avg_cost": 414.65},
+      "NVDA": {"shares": 141,   "avg_cost": 213.05},
+      "SGOV": {"shares": 78,    "avg_cost": 100.54},
+      "SPYL": {"shares": 3827,  "avg_cost": 17.97},
       "VOO":  {"shares": 28,    "avg_cost": 605.89},
-      "CASH": 340.02
+      "CASH": 129.82
     },
 
     "CITI_401K": {
